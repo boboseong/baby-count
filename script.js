@@ -41,7 +41,8 @@ const MAX_NUMBER = 5;
 const appState = {
   selectedItem: null,
   selectedNumber: null,
-  playbackToken: 0
+  playbackToken: 0,
+  remainingAnswers: []
 };
 
 let preferredSystemVoice = null;
@@ -54,9 +55,9 @@ const numberGrid = document.getElementById("number-grid");
 const selectedItemLabel = document.getElementById("selected-item-label");
 const resultLabel = document.getElementById("result-label");
 const objectStage = document.getElementById("object-stage");
+const answerGrid = document.getElementById("answer-grid");
 const statusText = document.getElementById("status-text");
 const backToItemsButton = document.getElementById("back-to-items");
-const homeButton = document.getElementById("home-button");
 const fullscreenButton = document.getElementById("fullscreen-button");
 
 renderItemSelection();
@@ -68,10 +69,6 @@ lockZoomGestures();
 backToItemsButton.addEventListener("click", () => {
   window.speechSynthesis.cancel();
   showStep("item");
-});
-
-homeButton.addEventListener("click", () => {
-  resetToHome();
 });
 
 function renderItemSelection() {
@@ -156,6 +153,9 @@ async function playCounting() {
 
   window.speechSynthesis.cancel();
   objectStage.innerHTML = "";
+  answerGrid.innerHTML = "";
+  appState.remainingAnswers = Array.from({ length: MAX_NUMBER }, (_, index) => index + 1);
+  renderAnswerButtons();
   statusText.textContent = "";
   resultLabel.textContent = `${item.name} ${COUNTER_WORDS[number]}${item.counter}`;
   showStep("play");
@@ -178,6 +178,45 @@ async function playCounting() {
   const summary = `${item.name} ${COUNTER_WORDS[number]}${item.counter}`;
   statusText.textContent = summary;
   await speak(summary);
+}
+
+function renderAnswerButtons() {
+  if (!answerGrid) {
+    return;
+  }
+
+  answerGrid.innerHTML = "";
+
+  appState.remainingAnswers.forEach((number) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "answer-button";
+    button.textContent = String(number);
+    button.addEventListener("click", () => handleAnswer(number, button));
+    answerGrid.appendChild(button);
+  });
+}
+
+async function handleAnswer(number, button) {
+  if (!appState.selectedNumber) {
+    return;
+  }
+
+  appState.playbackToken = Date.now();
+  window.speechSynthesis.cancel();
+  statusText.textContent = NUMBER_WORDS[number];
+  await speak(NUMBER_WORDS[number]);
+
+  if (number === appState.selectedNumber) {
+    statusText.textContent = "와! 맞았어요!";
+    await playCheerSound();
+    resetToHome();
+    return;
+  }
+
+  appState.remainingAnswers = appState.remainingAnswers.filter((value) => value !== number);
+  button.remove();
+  statusText.textContent = "다시 골라보세요.";
 }
 
 function addObjectCard(item, index) {
@@ -206,8 +245,10 @@ function resetToHome() {
   appState.selectedItem = null;
   appState.selectedNumber = null;
   appState.playbackToken = Date.now();
+  appState.remainingAnswers = [];
   window.speechSynthesis.cancel();
   objectStage.innerHTML = "";
+  answerGrid.innerHTML = "";
   statusText.textContent = "";
   resultLabel.textContent = "";
   selectedItemLabel.textContent = "";
@@ -225,8 +266,19 @@ function syncSelectedButtons(selector, selectedValue, key) {
 
 function speak(text) {
   return new Promise((resolve) => {
-    if (!("speechSynthesis" in window)) {
+    let settled = false;
+
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
       resolve();
+    };
+
+    if (!("speechSynthesis" in window)) {
+      finish();
       return;
     }
 
@@ -242,9 +294,16 @@ function speak(text) {
 
     utterance.rate = 0.82;
     utterance.pitch = 1.05;
-    utterance.onend = () => resolve();
-    utterance.onerror = () => resolve();
-    window.speechSynthesis.speak(utterance);
+    utterance.onend = finish;
+    utterance.onerror = finish;
+
+    window.setTimeout(finish, 1600);
+
+    try {
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      finish();
+    }
   });
 }
 
@@ -386,5 +445,43 @@ function pickSystemVoice(voices) {
 function wait(duration) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, duration);
+  });
+}
+
+function playCheerSound() {
+  return new Promise((resolve) => {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+    if (!AudioContextClass) {
+      resolve();
+      return;
+    }
+
+    const context = new AudioContextClass();
+    const now = context.currentTime;
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+
+    notes.forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const start = now + index * 0.08;
+      const end = start + 0.26;
+
+      oscillator.type = "triangle";
+      oscillator.frequency.setValueAtTime(frequency, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.22, start + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(start);
+      oscillator.stop(end);
+    });
+
+    window.setTimeout(() => {
+      context.close().catch(() => {});
+      resolve();
+    }, 520);
   });
 }
