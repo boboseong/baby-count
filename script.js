@@ -36,6 +36,8 @@ const COUNTER_WORDS = {
   12: "열두"
 };
 
+const MAX_NUMBER = 5;
+
 const appState = {
   selectedItem: null,
   selectedNumber: null,
@@ -103,15 +105,12 @@ function renderItemSelection() {
 }
 
 function renderNumberSelection() {
-  for (let number = 1; number <= 12; number += 1) {
+  for (let number = 1; number <= MAX_NUMBER; number += 1) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "number-button";
     button.dataset.number = String(number);
-    button.innerHTML = [
-      `<span class="number-label">${number}</span>`,
-      `<span class="number-subtitle">${NUMBER_WORDS[number]}</span>`
-    ].join("");
+    button.innerHTML = `<span class="number-label">${number}</span>`;
     button.addEventListener("click", () => selectNumber(number));
     numberGrid.appendChild(button);
   }
@@ -127,12 +126,12 @@ function selectItem(itemId) {
     return;
   }
 
-  selectedItemLabel.textContent = `${appState.selectedItem.name}을(를) 골랐어요.`;
+  selectedItemLabel.textContent = appState.selectedItem.name;
   showStep("number");
 }
 
 function selectNumber(number) {
-  if (!appState.selectedItem) {
+  if (!appState.selectedItem || number < 1 || number > MAX_NUMBER) {
     return;
   }
 
@@ -155,7 +154,7 @@ async function playCounting() {
   window.speechSynthesis.cancel();
   objectStage.innerHTML = "";
   statusText.textContent = "";
-  resultLabel.textContent = `${item.name} ${COUNTER_WORDS[number]}${item.counter}를 함께 세어요.`;
+  resultLabel.textContent = `${item.name} ${COUNTER_WORDS[number]}${item.counter}`;
   showStep("play");
 
   for (let index = 1; index <= number; index += 1) {
@@ -182,10 +181,7 @@ function addObjectCard(item, index) {
   const card = document.createElement("article");
   card.className = "object-card";
   card.style.animationDelay = `${Math.min(index * 40, 280)}ms`;
-  card.innerHTML = [
-    `<div class="object-symbol" aria-hidden="true">${item.symbol}</div>`,
-    `<div class="object-name">${item.name}</div>`
-  ].join("");
+  card.innerHTML = `<div class="object-symbol" aria-hidden="true">${item.symbol}</div>`;
   objectStage.appendChild(card);
 }
 
