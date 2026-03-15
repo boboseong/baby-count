@@ -57,10 +57,13 @@ const objectStage = document.getElementById("object-stage");
 const statusText = document.getElementById("status-text");
 const backToItemsButton = document.getElementById("back-to-items");
 const homeButton = document.getElementById("home-button");
+const fullscreenButton = document.getElementById("fullscreen-button");
 
 renderItemSelection();
 renderNumberSelection();
 initSystemTtsVoice();
+initFullscreenToggle();
+lockZoomGestures();
 
 backToItemsButton.addEventListener("click", () => {
   window.speechSynthesis.cancel();
@@ -255,6 +258,104 @@ function initSystemTtsVoice() {
   if (typeof window.speechSynthesis.addEventListener === "function") {
     window.speechSynthesis.addEventListener("voiceschanged", refreshPreferredSystemVoice);
   }
+}
+
+function initFullscreenToggle() {
+  if (!fullscreenButton) {
+    return;
+  }
+
+  const root = document.documentElement;
+  const supported = Boolean(root.requestFullscreen || root.webkitRequestFullscreen);
+
+  if (!supported) {
+    fullscreenButton.hidden = true;
+    return;
+  }
+
+  fullscreenButton.addEventListener("click", toggleFullscreen);
+  document.addEventListener("fullscreenchange", syncFullscreenButtonState);
+  document.addEventListener("webkitfullscreenchange", syncFullscreenButtonState);
+  syncFullscreenButtonState();
+}
+
+function toggleFullscreen() {
+  const root = document.documentElement;
+  const active = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+
+  if (active) {
+    if (document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+      return;
+    }
+
+    if (document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    }
+
+    return;
+  }
+
+  if (root.requestFullscreen) {
+    root.requestFullscreen().catch(() => {});
+    return;
+  }
+
+  if (root.webkitRequestFullscreen) {
+    root.webkitRequestFullscreen();
+  }
+}
+
+function syncFullscreenButtonState() {
+  if (!fullscreenButton) {
+    return;
+  }
+
+  const active = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+  fullscreenButton.textContent = active ? "전체화면 해제" : "전체화면";
+  fullscreenButton.setAttribute("aria-pressed", active ? "true" : "false");
+}
+
+function lockZoomGestures() {
+  let lastTouchEnd = 0;
+
+  document.addEventListener(
+    "touchend",
+    (event) => {
+      const now = Date.now();
+
+      if (now - lastTouchEnd <= 320) {
+        event.preventDefault();
+      }
+
+      lastTouchEnd = now;
+    },
+    { passive: false }
+  );
+
+  ["gesturestart", "gesturechange", "gestureend"].forEach((eventName) => {
+    document.addEventListener(
+      eventName,
+      (event) => {
+        event.preventDefault();
+      },
+      { passive: false }
+    );
+  });
+
+  document.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+  });
+
+  window.addEventListener(
+    "wheel",
+    (event) => {
+      if (event.ctrlKey) {
+        event.preventDefault();
+      }
+    },
+    { passive: false }
+  );
 }
 
 function refreshPreferredSystemVoice() {
