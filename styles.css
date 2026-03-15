@@ -15,11 +15,20 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
   color: var(--text-main);
+  touch-action: manipulation;
   background:
     radial-gradient(circle at top left, rgba(255, 255, 255, 0.75), transparent 28%),
     radial-gradient(circle at bottom right, rgba(255, 255, 255, 0.45), transparent 32%),
@@ -31,25 +40,37 @@ button {
 }
 
 .app-shell {
-  width: min(960px, calc(100% - 32px));
+  width: min(980px, calc(100% - 18px));
+  height: 100dvh;
   margin: 0 auto;
-  padding: 32px 0 40px;
+  padding: clamp(8px, 1.6vh, 14px) 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: clamp(8px, 1.3vh, 12px);
+  overflow: hidden;
 }
 
 .hero {
   text-align: center;
-  margin-bottom: 14px;
+  margin-bottom: 0;
+}
+
+.hero-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
 }
 
 .eyebrow {
-  margin: 0 0 10px;
+  margin: 0;
   font-weight: 700;
   color: var(--accent-strong);
 }
 
 .hero h1 {
-  margin: 0;
-  font-size: clamp(2.1rem, 5.6vw, 3.6rem);
+  margin: clamp(4px, 0.8vh, 8px) 0 0;
+  font-size: clamp(1.7rem, 4.1vw, 2.9rem);
   line-height: 1.1;
 }
 
@@ -64,12 +85,16 @@ button {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 28px;
-  padding: 28px;
+  padding: clamp(12px, 1.8vh, 18px);
   box-shadow: var(--shadow);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .panel + .panel {
-  margin-top: 18px;
+  margin-top: 0;
 }
 
 .panel[hidden] {
@@ -79,50 +104,62 @@ button {
 .panel-head {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
+  gap: 10px;
+  align-items: center;
 }
 
 .panel h2 {
-  margin: 0 0 18px;
-  font-size: 1.55rem;
+  margin: 0;
+  font-size: clamp(1.2rem, 2.8vw, 1.55rem);
 }
 
 .selected-item-label {
-  margin: 4px 0 0;
+  margin: 2px 0 0;
   color: var(--text-soft);
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 0.86rem;
 }
 
 .item-groups {
   display: grid;
-  gap: 18px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 0;
+  flex: 1;
 }
 
 .item-group {
   display: grid;
-  gap: 12px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 6px;
+  min-height: 0;
 }
 
 .item-group-title {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   color: var(--accent-strong);
 }
 
-.item-grid,
+.item-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .number-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
 }
 
 .item-button,
 .number-button {
   border: 0;
   border-radius: 22px;
-  padding: 18px 12px;
+  padding: 12px 8px;
   background: #fffdf8;
   color: var(--text-main);
   box-shadow: inset 0 0 0 1px rgba(217, 108, 47, 0.14);
@@ -131,7 +168,7 @@ button {
 }
 
 .number-button {
-  min-height: 118px;
+  min-height: 0;
 }
 
 .item-button:hover,
@@ -153,8 +190,9 @@ button {
 
 .item-symbol {
   display: block;
-  font-size: clamp(2.8rem, 7vw, 4.2rem);
-  margin-bottom: 8px;
+  font-size: clamp(2.5rem, 7.6vh, 4.5rem);
+  line-height: 1;
+  margin-bottom: 4px;
 }
 
 .item-name,
@@ -163,28 +201,26 @@ button {
 }
 
 .item-name {
-  font-size: 0.9rem;
+  font-size: 0.82rem;
 }
 
 .number-label {
   display: block;
-  font-size: clamp(2.6rem, 8vw, 4rem);
+  font-size: clamp(2.8rem, 10vh, 5rem);
   line-height: 1;
 }
 
 .number-subtitle {
-  display: block;
-  margin-top: 6px;
-  color: var(--text-soft);
-  font-size: 0.9rem;
+  display: none;
 }
 
 .primary-button,
 .secondary-button {
   border: 0;
   border-radius: 999px;
-  padding: 12px 18px;
+  padding: 9px 14px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .primary-button {
@@ -198,22 +234,24 @@ button {
 }
 
 .object-stage {
-  min-height: 260px;
-  margin-top: 22px;
-  padding: 18px;
+  min-height: 0;
+  margin-top: 8px;
+  padding: 10px;
   border-radius: 24px;
   background: rgba(255, 250, 239, 0.88);
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-  gap: 14px;
-  align-items: end;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+  flex: 1;
 }
 
 .object-card {
-  min-height: 150px;
+  min-height: 0;
+  aspect-ratio: 0.88;
   display: grid;
   place-items: center;
-  padding: 14px 10px;
+  padding: 8px;
   border-radius: 24px;
   background: white;
   box-shadow: inset 0 0 0 1px rgba(217, 108, 47, 0.12);
@@ -223,7 +261,8 @@ button {
 }
 
 .object-symbol {
-  font-size: clamp(3.4rem, 10vw, 5.4rem);
+  font-size: clamp(3rem, 11vh, 6rem);
+  line-height: 1;
 }
 
 .object-name {
@@ -232,11 +271,12 @@ button {
 }
 
 .status-text {
-  margin: 18px 4px 0;
-  min-height: 28px;
-  font-size: 1.05rem;
+  margin: 8px 4px 0;
+  min-height: 22px;
+  font-size: 0.98rem;
   font-weight: 700;
   color: var(--accent-strong);
+  text-align: center;
 }
 
 @keyframes pop-in {
@@ -248,22 +288,46 @@ button {
 
 @media (max-width: 720px) {
   .app-shell {
-    width: min(100% - 20px, 960px);
-    padding-top: 20px;
+    width: min(100% - 12px, 980px);
   }
 
   .panel {
-    padding: 20px;
+    padding: 10px;
     border-radius: 22px;
   }
 
-  .panel-head {
-    flex-direction: column;
-    align-items: stretch;
+  .item-groups {
+    gap: 6px;
   }
 
-  .primary-button,
-  .secondary-button {
-    width: 100%;
+  .item-group-title {
+    font-size: 0.88rem;
+  }
+
+  .item-name {
+    font-size: 0.78rem;
+  }
+
+  .item-button,
+  .number-button {
+    border-radius: 18px;
+  }
+}
+
+@media (max-height: 760px) {
+  .hero h1 {
+    font-size: clamp(1.45rem, 3.8vw, 2.2rem);
+  }
+
+  .item-symbol {
+    font-size: clamp(2.15rem, 6.5vh, 3.4rem);
+  }
+
+  .number-label {
+    font-size: clamp(2.3rem, 8.2vh, 4rem);
+  }
+
+  .object-symbol {
+    font-size: clamp(2.4rem, 8.4vh, 4.2rem);
   }
 }
