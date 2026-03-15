@@ -1,0 +1,254 @@
+:root {
+  --bg-top: #fff6df;
+  --bg-bottom: #ffe1d6;
+  --panel: rgba(255, 255, 255, 0.86);
+  --panel-border: rgba(196, 119, 58, 0.18);
+  --text-main: #432818;
+  --text-soft: #7b5b47;
+  --accent: #d96c2f;
+  --accent-strong: #bc4e16;
+  --accent-pale: #fff2d8;
+  --shadow: 0 22px 48px rgba(122, 73, 34, 0.16);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  color: var(--text-main);
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.75), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(255, 255, 255, 0.45), transparent 32%),
+    linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+}
+
+button {
+  font: inherit;
+}
+
+.app-shell {
+  width: min(960px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 32px 0 40px;
+}
+
+.hero {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  line-height: 1.1;
+}
+
+.subtitle {
+  margin: 12px auto 0;
+  max-width: 620px;
+  color: var(--text-soft);
+  font-size: 1.05rem;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 28px;
+  padding: 28px;
+  box-shadow: var(--shadow);
+}
+
+.panel + .panel {
+  margin-top: 18px;
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.panel h2 {
+  margin: 0 0 18px;
+  font-size: 1.55rem;
+}
+
+.selected-item-label {
+  margin: 4px 0 0;
+  color: var(--text-soft);
+  font-weight: 700;
+}
+
+.item-groups {
+  display: grid;
+  gap: 18px;
+}
+
+.item-group {
+  display: grid;
+  gap: 12px;
+}
+
+.item-group-title {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--accent-strong);
+}
+
+.item-grid,
+.number-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 12px;
+}
+
+.item-button,
+.number-button {
+  border: 0;
+  border-radius: 22px;
+  padding: 16px 12px;
+  background: #fffdf8;
+  color: var(--text-main);
+  box-shadow: inset 0 0 0 1px rgba(217, 108, 47, 0.14);
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+.item-button:hover,
+.item-button:focus-visible,
+.number-button:hover,
+.number-button:focus-visible,
+.primary-button:hover,
+.primary-button:focus-visible,
+.secondary-button:hover,
+.secondary-button:focus-visible {
+  transform: translateY(-2px);
+}
+
+.item-button.selected,
+.number-button.selected {
+  background: var(--accent-pale);
+  box-shadow: inset 0 0 0 2px rgba(217, 108, 47, 0.45);
+}
+
+.item-symbol {
+  display: block;
+  font-size: 2rem;
+  margin-bottom: 8px;
+}
+
+.item-name,
+.number-label {
+  font-weight: 700;
+}
+
+.number-subtitle {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.primary-button,
+.secondary-button {
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 18px;
+  cursor: pointer;
+}
+
+.primary-button {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: #fff;
+}
+
+.secondary-button {
+  background: rgba(217, 108, 47, 0.14);
+  color: var(--accent-strong);
+}
+
+.object-stage {
+  min-height: 260px;
+  margin-top: 22px;
+  padding: 18px;
+  border-radius: 24px;
+  background: rgba(255, 250, 239, 0.88);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+
+.object-card {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  padding: 14px 10px;
+  border-radius: 24px;
+  background: white;
+  box-shadow: inset 0 0 0 1px rgba(217, 108, 47, 0.12);
+  opacity: 0;
+  transform: translateY(20px) scale(0.96);
+  animation: pop-in 360ms ease forwards;
+}
+
+.object-symbol {
+  font-size: clamp(2rem, 5vw, 3rem);
+}
+
+.object-name {
+  margin-top: 8px;
+  font-weight: 700;
+}
+
+.status-text {
+  margin: 18px 4px 0;
+  min-height: 28px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+@keyframes pop-in {
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    width: min(100% - 20px, 960px);
+    padding-top: 20px;
+  }
+
+  .panel {
+    padding: 20px;
+    border-radius: 22px;
+  }
+
+  .panel-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .primary-button,
+  .secondary-button {
+    width: 100%;
+  }
+}
