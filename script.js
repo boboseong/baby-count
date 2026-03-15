@@ -155,7 +155,6 @@ async function playCounting() {
   objectStage.innerHTML = "";
   answerGrid.innerHTML = "";
   appState.remainingAnswers = Array.from({ length: MAX_NUMBER }, (_, index) => index + 1);
-  renderAnswerButtons();
   statusText.textContent = "";
   resultLabel.textContent = `${item.name} ${COUNTER_WORDS[number]}${item.counter}`;
   showStep("play");
@@ -178,6 +177,12 @@ async function playCounting() {
   const summary = `${item.name} ${COUNTER_WORDS[number]}${item.counter}`;
   statusText.textContent = summary;
   await speak(summary);
+
+  if (appState.playbackToken !== token) {
+    return;
+  }
+
+  renderAnswerButtons();
 }
 
 function renderAnswerButtons() {
