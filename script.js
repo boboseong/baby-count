@@ -1,9 +1,16 @@
 const ITEMS = [
   { id: "rabbit", group: "동물", name: "토끼", symbol: "🐰", counter: "마리" },
-  { id: "apple", group: "과일", name: "사과", symbol: "🍎", counter: "개" },
-  { id: "strawberry", group: "과일", name: "딸기", symbol: "🍓", counter: "개" },
+  { id: "pig", group: "동물", name: "돼지", symbol: "🐷", counter: "마리" },
+  { id: "puppy", group: "동물", name: "강아지", symbol: "🐶", counter: "마리" },
+  { id: "cat", group: "동물", name: "고양이", symbol: "🐱", counter: "마리" },
+  { id: "apple", group: "음식", name: "사과", symbol: "🍎", counter: "개" },
+  { id: "strawberry", group: "음식", name: "딸기", symbol: "🍓", counter: "개" },
+  { id: "banana", group: "음식", name: "바나나", symbol: "🍌", counter: "개" },
+  { id: "milk", group: "음식", name: "우유", symbol: "🥛", counter: "컵" },
   { id: "shoe", group: "물건", name: "신발", symbol: "👟", counter: "켤레" },
-  { id: "clothes", group: "물건", name: "옷", symbol: "👕", counter: "벌" }
+  { id: "clothes", group: "물건", name: "옷", symbol: "👕", counter: "벌" },
+  { id: "car", group: "물건", name: "자동차", symbol: "🚗", counter: "대" },
+  { id: "bag", group: "물건", name: "가방", symbol: "🎒", counter: "개" }
 ];
 
 const NUMBER_WORDS = {
