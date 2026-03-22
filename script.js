@@ -52,6 +52,22 @@ const appState = {
   remainingAnswers: []
 };
 
+const DRAG_THRESHOLD = 8;
+
+const dragState = {
+  card: null,
+  pointerId: null,
+  startX: 0,
+  startY: 0,
+  originX: 0,
+  originY: 0,
+  baseLeft: 0,
+  baseTop: 0,
+  maxX: 0,
+  maxY: 0,
+  dragging: false
+};
+
 let preferredSystemVoice = null;
 
 const itemStep = document.getElementById("item-step");
@@ -71,9 +87,11 @@ renderItemSelection();
 renderNumberSelection();
 initSystemTtsVoice();
 initFullscreenToggle();
+initObjectCardDragging();
 lockZoomGestures();
 
 backToItemsButton.addEventListener("click", () => {
+  resetDragState();
   window.speechSynthesis.cancel();
   showStep("item");
 });
@@ -158,6 +176,7 @@ async function playCounting() {
   const token = Date.now();
   appState.playbackToken = token;
 
+  resetDragState();
   window.speechSynthesis.cancel();
   objectStage.innerHTML = "";
   answerGrid.innerHTML = "";
@@ -234,6 +253,8 @@ async function handleAnswer(number, button) {
 function addObjectCard(item, index) {
   const card = document.createElement("article");
   card.className = "object-card";
+  card.dataset.dragX = "0";
+  card.dataset.dragY = "0";
   card.style.animationDelay = `${Math.min(index * 40, 280)}ms`;
   card.innerHTML = `<div class="object-symbol" aria-hidden="true">${item.symbol}</div>`;
   objectStage.appendChild(card);
@@ -258,6 +279,7 @@ function resetToHome() {
   appState.selectedNumber = null;
   appState.playbackToken = Date.now();
   appState.remainingAnswers = [];
+  resetDragState();
   window.speechSynthesis.cancel();
   objectStage.innerHTML = "";
   answerGrid.innerHTML = "";
@@ -274,6 +296,116 @@ function syncSelectedButtons(selector, selectedValue, key) {
     const currentValue = button.dataset[key];
     button.classList.toggle("selected", currentValue === selectedValue);
   });
+}
+
+function initObjectCardDragging() {
+  if (!objectStage) {
+    return;
+  }
+
+  objectStage.addEventListener("pointerdown", handleCardPointerDown);
+  objectStage.addEventListener("pointermove", handleCardPointerMove);
+  objectStage.addEventListener("pointerup", handleCardPointerEnd);
+  objectStage.addEventListener("pointercancel", handleCardPointerEnd);
+  objectStage.addEventListener("lostpointercapture", handleCardPointerEnd);
+}
+
+function handleCardPointerDown(event) {
+  const card = event.target.closest(".object-card");
+
+  if (!card || !objectStage || dragState.card) {
+    return;
+  }
+
+  const stageRect = objectStage.getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  const originX = Number(card.dataset.dragX || 0);
+  const originY = Number(card.dataset.dragY || 0);
+
+  dragState.card = card;
+  dragState.pointerId = event.pointerId;
+  dragState.startX = event.clientX;
+  dragState.startY = event.clientY;
+  dragState.originX = originX;
+  dragState.originY = originY;
+  dragState.baseLeft = cardRect.left - stageRect.left - originX;
+  dragState.baseTop = cardRect.top - stageRect.top - originY;
+  dragState.maxX = Math.max(stageRect.width - cardRect.width - dragState.baseLeft, 0);
+  dragState.maxY = Math.max(stageRect.height - cardRect.height - dragState.baseTop, 0);
+  dragState.dragging = false;
+
+  card.setPointerCapture(event.pointerId);
+}
+
+function handleCardPointerMove(event) {
+  if (!dragState.card || dragState.pointerId !== event.pointerId) {
+    return;
+  }
+
+  const deltaX = event.clientX - dragState.startX;
+  const deltaY = event.clientY - dragState.startY;
+
+  if (!dragState.dragging) {
+    const distance = Math.hypot(deltaX, deltaY);
+
+    if (distance < DRAG_THRESHOLD) {
+      return;
+    }
+
+    dragState.dragging = true;
+    dragState.card.classList.add("dragging");
+  }
+
+  event.preventDefault();
+
+  const nextX = clamp(dragState.originX + deltaX, -dragState.baseLeft, dragState.maxX);
+  const nextY = clamp(dragState.originY + deltaY, -dragState.baseTop, dragState.maxY);
+  applyCardPosition(dragState.card, nextX, nextY);
+}
+
+function handleCardPointerEnd(event) {
+  if (!dragState.card || dragState.pointerId !== event.pointerId) {
+    return;
+  }
+
+  resetDragState();
+}
+
+function resetDragState() {
+  if (!dragState.card) {
+    return;
+  }
+
+  if (
+    dragState.pointerId !== null &&
+    typeof dragState.card.hasPointerCapture === "function" &&
+    dragState.card.hasPointerCapture(dragState.pointerId)
+  ) {
+    dragState.card.releasePointerCapture(dragState.pointerId);
+  }
+
+  dragState.card.classList.remove("dragging");
+  dragState.card = null;
+  dragState.pointerId = null;
+  dragState.startX = 0;
+  dragState.startY = 0;
+  dragState.originX = 0;
+  dragState.originY = 0;
+  dragState.baseLeft = 0;
+  dragState.baseTop = 0;
+  dragState.maxX = 0;
+  dragState.maxY = 0;
+  dragState.dragging = false;
+}
+
+function applyCardPosition(card, x, y) {
+  card.dataset.dragX = String(x);
+  card.dataset.dragY = String(y);
+  card.style.transform = `translate(${x}px, ${y}px)`;
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function speak(text) {

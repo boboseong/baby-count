@@ -284,6 +284,18 @@ button {
   opacity: 0;
   transform: translateY(20px) scale(0.96);
   animation: pop-in 360ms ease forwards;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+  transition: box-shadow 140ms ease;
+  will-change: transform;
+}
+
+.object-card.dragging {
+  cursor: grabbing;
+  box-shadow:
+    0 16px 28px rgba(122, 73, 34, 0.18),
+    inset 0 0 0 2px rgba(217, 108, 47, 0.28);
 }
 
 .object-symbol {
