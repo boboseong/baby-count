@@ -49,8 +49,52 @@ const appState = {
   selectedItem: null,
   selectedNumber: null,
   playbackToken: 0,
-  remainingAnswers: []
+  remainingAnswers: [],
+  suppressObjectTap: false
 };
+
+let emojiOverrideItemId = (function () {
+  try {
+    const id = sessionStorage.getItem("emojiOverrideItemId");
+    if (id && ITEMS.find((item) => item.id === id)) {
+      return id;
+    }
+  } catch {
+  }
+
+  const ids = ITEMS.map((item) => item.id);
+  const chosen = ids[Math.floor(Math.random() * ids.length)];
+
+  try {
+    sessionStorage.setItem("emojiOverrideItemId", chosen);
+  } catch {
+  }
+
+  return chosen;
+})();
+
+function getOverrideEmojiForGroup(group) {
+  const map = {
+    동물: "🧸",
+    음식: "🍪",
+    물건: "🎈"
+  };
+
+  return map[group] || "✨";
+}
+
+function getDisplaySymbol(item) {
+  const override = item.id === emojiOverrideItemId ? getOverrideEmojiForGroup(item.group) : null;
+  return override || item.symbol;
+}
+
+function formatCountSummary(item, number) {
+  return `${item.name} ${COUNTER_WORDS[number]} ${item.counter}`;
+}
+
+function formatObjectTapSpeech(item, number) {
+  return `${item.name} ${NUMBER_WORDS[number]}`;
+}
 
 const DRAG_THRESHOLD = 8;
 
@@ -117,7 +161,7 @@ function renderItemSelection() {
       button.className = "item-button";
       button.dataset.itemId = item.id;
       button.innerHTML = [
-        `<span class="item-symbol" aria-hidden="true">${item.symbol}</span>`,
+        `<span class="item-symbol" aria-hidden="true">${getDisplaySymbol(item)}</span>`,
         `<span class="item-name">${item.name}</span>`
       ].join("");
       button.addEventListener("click", () => selectItem(item.id));
@@ -181,8 +225,9 @@ async function playCounting() {
   objectStage.innerHTML = "";
   answerGrid.innerHTML = "";
   appState.remainingAnswers = Array.from({ length: MAX_NUMBER }, (_, index) => index + 1);
+  appState.suppressObjectTap = false;
   statusText.textContent = "";
-  resultLabel.textContent = `${item.name} ${COUNTER_WORDS[number]}${item.counter}`;
+  resultLabel.textContent = formatCountSummary(item, number);
   showStep("play");
 
   for (let index = 1; index <= number; index += 1) {
@@ -200,7 +245,7 @@ async function playCounting() {
     return;
   }
 
-  const summary = `${item.name} ${COUNTER_WORDS[number]}${item.counter}`;
+  const summary = formatCountSummary(item, number);
   statusText.textContent = summary;
   await speak(summary);
 
@@ -251,12 +296,24 @@ async function handleAnswer(number, button) {
 }
 
 function addObjectCard(item, index) {
-  const card = document.createElement("article");
+  const card = document.createElement("button");
+  card.type = "button";
   card.className = "object-card";
   card.dataset.dragX = "0";
   card.dataset.dragY = "0";
   card.style.animationDelay = `${Math.min(index * 40, 280)}ms`;
   card.innerHTML = `<div class="object-symbol" aria-hidden="true">${item.symbol}</div>`;
+  card.addEventListener("click", () => {
+    if (!appState.selectedNumber || appState.suppressObjectTap) {
+      return;
+    }
+
+    const phrase = formatObjectTapSpeech(item, appState.selectedNumber);
+    appState.playbackToken = Date.now();
+    window.speechSynthesis.cancel();
+    statusText.textContent = phrase;
+    speak(phrase);
+  });
   objectStage.appendChild(card);
 }
 
@@ -279,6 +336,7 @@ function resetToHome() {
   appState.selectedNumber = null;
   appState.playbackToken = Date.now();
   appState.remainingAnswers = [];
+  appState.suppressObjectTap = false;
   resetDragState();
   window.speechSynthesis.cancel();
   objectStage.innerHTML = "";
@@ -353,6 +411,7 @@ function handleCardPointerMove(event) {
     }
 
     dragState.dragging = true;
+    appState.suppressObjectTap = true;
     dragState.card.classList.add("dragging");
   }
 
@@ -366,6 +425,14 @@ function handleCardPointerMove(event) {
 function handleCardPointerEnd(event) {
   if (!dragState.card || dragState.pointerId !== event.pointerId) {
     return;
+  }
+
+  if (dragState.dragging) {
+    window.setTimeout(() => {
+      appState.suppressObjectTap = false;
+    }, 0);
+  } else {
+    appState.suppressObjectTap = false;
   }
 
   resetDragState();
