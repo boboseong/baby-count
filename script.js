@@ -50,28 +50,17 @@ const appState = {
   selectedNumber: null,
   playbackToken: 0,
   remainingAnswers: [],
-  suppressObjectTap: false
+  suppressObjectTap: false,
+  isRevealInProgress: false
 };
 
-let emojiOverrideItemId = (function () {
-  try {
-    const id = sessionStorage.getItem("emojiOverrideItemId");
-    if (id && ITEMS.find((item) => item.id === id)) {
-      return id;
-    }
-  } catch {
-  }
+let emojiOverrideItemId = pickEmojiOverrideItemId();
 
-  const ids = ITEMS.map((item) => item.id);
-  const chosen = ids[Math.floor(Math.random() * ids.length)];
-
-  try {
-    sessionStorage.setItem("emojiOverrideItemId", chosen);
-  } catch {
-  }
-
-  return chosen;
-})();
+function pickEmojiOverrideItemId(previousItemId = null) {
+  const candidateIds = ITEMS.map((item) => item.id).filter((itemId) => itemId !== previousItemId);
+  const ids = candidateIds.length > 0 ? candidateIds : ITEMS.map((item) => item.id);
+  return ids[Math.floor(Math.random() * ids.length)];
+}
 
 function getOverrideEmojiForGroup(group) {
   const map = {
@@ -86,6 +75,22 @@ function getOverrideEmojiForGroup(group) {
 function getDisplaySymbol(item) {
   const override = item.id === emojiOverrideItemId ? getOverrideEmojiForGroup(item.group) : null;
   return override || item.symbol;
+}
+
+function refreshHomeEmojiOverride() {
+  emojiOverrideItemId = pickEmojiOverrideItemId(emojiOverrideItemId);
+
+  document.querySelectorAll(".item-button").forEach((button) => {
+    const itemId = button.dataset.itemId;
+    const item = ITEMS.find((entry) => entry.id === itemId);
+    const symbol = button.querySelector(".item-symbol");
+
+    if (!item || !symbol) {
+      return;
+    }
+
+    symbol.textContent = getDisplaySymbol(item);
+  });
 }
 
 function formatCountSummary(item, number) {
@@ -136,7 +141,10 @@ lockZoomGestures();
 
 backToItemsButton.addEventListener("click", () => {
   resetDragState();
+  appState.playbackToken = Date.now();
+  appState.isRevealInProgress = false;
   window.speechSynthesis.cancel();
+  refreshHomeEmojiOverride();
   showStep("item");
 });
 
@@ -219,6 +227,7 @@ async function playCounting() {
 
   const token = Date.now();
   appState.playbackToken = token;
+  appState.isRevealInProgress = true;
 
   resetDragState();
   window.speechSynthesis.cancel();
@@ -230,30 +239,36 @@ async function playCounting() {
   resultLabel.textContent = formatCountSummary(item, number);
   showStep("play");
 
-  for (let index = 1; index <= number; index += 1) {
+  try {
+    for (let index = 1; index <= number; index += 1) {
+      if (appState.playbackToken !== token) {
+        return;
+      }
+
+      addObjectCard(item, index);
+      statusText.textContent = NUMBER_WORDS[index];
+      await speak(`${NUMBER_WORDS[index]}`);
+      await wait(380);
+    }
+
     if (appState.playbackToken !== token) {
       return;
     }
 
-    addObjectCard(item, index);
-    statusText.textContent = NUMBER_WORDS[index];
-    await speak(`${NUMBER_WORDS[index]}`);
-    await wait(380);
+    const summary = formatCountSummary(item, number);
+    statusText.textContent = summary;
+    await speak(summary);
+
+    if (appState.playbackToken !== token) {
+      return;
+    }
+
+    renderAnswerButtons();
+  } finally {
+    if (appState.playbackToken === token) {
+      appState.isRevealInProgress = false;
+    }
   }
-
-  if (appState.playbackToken !== token) {
-    return;
-  }
-
-  const summary = formatCountSummary(item, number);
-  statusText.textContent = summary;
-  await speak(summary);
-
-  if (appState.playbackToken !== token) {
-    return;
-  }
-
-  renderAnswerButtons();
 }
 
 function renderAnswerButtons() {
@@ -309,6 +324,11 @@ function addObjectCard(item, index) {
     }
 
     const phrase = formatObjectTapSpeech(item, appState.selectedNumber);
+
+    if (appState.isRevealInProgress) {
+      return;
+    }
+
     appState.playbackToken = Date.now();
     window.speechSynthesis.cancel();
     statusText.textContent = phrase;
@@ -337,6 +357,7 @@ function resetToHome() {
   appState.playbackToken = Date.now();
   appState.remainingAnswers = [];
   appState.suppressObjectTap = false;
+  appState.isRevealInProgress = false;
   resetDragState();
   window.speechSynthesis.cancel();
   objectStage.innerHTML = "";
@@ -346,6 +367,7 @@ function resetToHome() {
   selectedItemLabel.textContent = "";
   syncSelectedButtons(".item-button", null, "itemId");
   syncSelectedButtons(".number-button", null, "number");
+  refreshHomeEmojiOverride();
   showStep("item");
 }
 
