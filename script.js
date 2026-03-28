@@ -47,6 +47,7 @@ const MAX_NUMBER = 5;
 
 const appState = {
   selectedItem: null,
+  selectedDisplayItem: null,
   selectedNumber: null,
   playbackToken: 0,
   remainingAnswers: [],
@@ -62,19 +63,19 @@ function pickEmojiOverrideItemId(previousItemId = null) {
   return ids[Math.floor(Math.random() * ids.length)];
 }
 
-function getOverrideEmojiForGroup(group) {
-  const map = {
-    동물: "🧸",
-    음식: "🍪",
-    물건: "🎈"
+function getDisplayItem(item) {
+  if (!item || item.id !== emojiOverrideItemId) {
+    return item;
+  }
+
+  const overrideMap = {
+    동물: { name: "곰", symbol: "🧸", counter: "마리" },
+    음식: { name: "쿠키", symbol: "🍪", counter: "개" },
+    물건: { name: "풍선", symbol: "🎈", counter: "개" }
   };
+  const override = overrideMap[item.group] || { name: item.name, symbol: "✨", counter: item.counter };
 
-  return map[group] || "✨";
-}
-
-function getDisplaySymbol(item) {
-  const override = item.id === emojiOverrideItemId ? getOverrideEmojiForGroup(item.group) : null;
-  return override || item.symbol;
+  return { ...item, ...override };
 }
 
 function refreshHomeEmojiOverride() {
@@ -83,22 +84,27 @@ function refreshHomeEmojiOverride() {
   document.querySelectorAll(".item-button").forEach((button) => {
     const itemId = button.dataset.itemId;
     const item = ITEMS.find((entry) => entry.id === itemId);
+    const displayItem = getDisplayItem(item);
     const symbol = button.querySelector(".item-symbol");
+    const name = button.querySelector(".item-name");
 
-    if (!item || !symbol) {
+    if (!displayItem || !symbol || !name) {
       return;
     }
 
-    symbol.textContent = getDisplaySymbol(item);
+    symbol.textContent = displayItem.symbol;
+    name.textContent = displayItem.name;
   });
 }
 
 function formatCountSummary(item, number) {
-  return `${item.name} ${COUNTER_WORDS[number]} ${item.counter}`;
+  const displayItem = getDisplayItem(item);
+  return `${displayItem.name} ${COUNTER_WORDS[number]} ${displayItem.counter}`;
 }
 
 function formatObjectTapSpeech(item, number) {
-  return `${item.name} ${NUMBER_WORDS[number]}`;
+  const displayItem = getDisplayItem(item);
+  return `${displayItem.name} ${NUMBER_WORDS[number]}`;
 }
 
 const DRAG_THRESHOLD = 8;
@@ -164,13 +170,14 @@ function renderItemSelection() {
     grid.className = "item-grid";
 
     ITEMS.filter((item) => item.group === groupName).forEach((item) => {
+      const displayItem = getDisplayItem(item);
       const button = document.createElement("button");
       button.type = "button";
       button.className = "item-button";
       button.dataset.itemId = item.id;
       button.innerHTML = [
-        `<span class="item-symbol" aria-hidden="true">${getDisplaySymbol(item)}</span>`,
-        `<span class="item-name">${item.name}</span>`
+        `<span class="item-symbol" aria-hidden="true">${displayItem.symbol}</span>`,
+        `<span class="item-name">${displayItem.name}</span>`
       ].join("");
       button.addEventListener("click", () => selectItem(item.id));
       grid.appendChild(button);
@@ -195,6 +202,7 @@ function renderNumberSelection() {
 
 function selectItem(itemId) {
   appState.selectedItem = ITEMS.find((item) => item.id === itemId) || null;
+  appState.selectedDisplayItem = appState.selectedItem ? getDisplayItem(appState.selectedItem) : null;
   appState.selectedNumber = null;
   syncSelectedButtons(".item-button", itemId, "itemId");
   syncSelectedButtons(".number-button", null, "number");
@@ -203,7 +211,7 @@ function selectItem(itemId) {
     return;
   }
 
-  selectedItemLabel.textContent = appState.selectedItem.name;
+  selectedItemLabel.textContent = appState.selectedDisplayItem.name;
   showStep("number");
 }
 
@@ -218,7 +226,7 @@ function selectNumber(number) {
 }
 
 async function playCounting() {
-  const item = appState.selectedItem;
+  const item = appState.selectedDisplayItem;
   const number = appState.selectedNumber;
 
   if (!item || !number) {
@@ -311,13 +319,14 @@ async function handleAnswer(number, button) {
 }
 
 function addObjectCard(item, index) {
+  const displayItem = getDisplayItem(item);
   const card = document.createElement("button");
   card.type = "button";
   card.className = "object-card";
   card.dataset.dragX = "0";
   card.dataset.dragY = "0";
   card.style.animationDelay = `${Math.min(index * 40, 280)}ms`;
-  card.innerHTML = `<div class="object-symbol" aria-hidden="true">${item.symbol}</div>`;
+  card.innerHTML = `<div class="object-symbol" aria-hidden="true">${displayItem.symbol}</div>`;
   card.addEventListener("click", () => {
     if (!appState.selectedNumber || appState.suppressObjectTap) {
       return;
@@ -353,6 +362,7 @@ function showStep(step) {
 
 function resetToHome() {
   appState.selectedItem = null;
+  appState.selectedDisplayItem = null;
   appState.selectedNumber = null;
   appState.playbackToken = Date.now();
   appState.remainingAnswers = [];
