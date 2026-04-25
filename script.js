@@ -57,6 +57,11 @@ const appState = {
 
 let emojiOverrideItemId = pickEmojiOverrideItemId();
 
+function nextPlaybackToken() {
+  appState.playbackToken += 1;
+  return appState.playbackToken;
+}
+
 function pickEmojiOverrideItemId(previousItemId = null) {
   const candidateIds = ITEMS.map((item) => item.id).filter((itemId) => itemId !== previousItemId);
   const ids = candidateIds.length > 0 ? candidateIds : ITEMS.map((item) => item.id);
@@ -147,9 +152,9 @@ lockZoomGestures();
 
 backToItemsButton.addEventListener("click", () => {
   resetDragState();
-  appState.playbackToken = Date.now();
+  nextPlaybackToken();
   appState.isRevealInProgress = false;
-  window.speechSynthesis.cancel();
+  cancelSpeech();
   refreshHomeEmojiOverride();
   showStep("item");
 });
@@ -233,12 +238,11 @@ async function playCounting() {
     return;
   }
 
-  const token = Date.now();
-  appState.playbackToken = token;
+  const token = nextPlaybackToken();
   appState.isRevealInProgress = true;
 
   resetDragState();
-  window.speechSynthesis.cancel();
+  cancelSpeech();
   objectStage.innerHTML = "";
   answerGrid.innerHTML = "";
   appState.remainingAnswers = Array.from({ length: MAX_NUMBER }, (_, index) => index + 1);
@@ -301,14 +305,21 @@ async function handleAnswer(number, button) {
     return;
   }
 
-  appState.playbackToken = Date.now();
-  window.speechSynthesis.cancel();
+  const token = nextPlaybackToken();
+  cancelSpeech();
   statusText.textContent = NUMBER_WORDS[number];
   await speak(NUMBER_WORDS[number]);
+
+  if (appState.playbackToken !== token) {
+    return;
+  }
 
   if (number === appState.selectedNumber) {
     statusText.textContent = "와! 맞았어요!";
     await playCheerSound();
+    if (appState.playbackToken !== token) {
+      return;
+    }
     resetToHome();
     return;
   }
@@ -338,8 +349,7 @@ function addObjectCard(item, index) {
       return;
     }
 
-    appState.playbackToken = Date.now();
-    window.speechSynthesis.cancel();
+    cancelSpeech();
     statusText.textContent = phrase;
     speak(phrase);
   });
@@ -364,12 +374,12 @@ function resetToHome() {
   appState.selectedItem = null;
   appState.selectedDisplayItem = null;
   appState.selectedNumber = null;
-  appState.playbackToken = Date.now();
+  nextPlaybackToken();
   appState.remainingAnswers = [];
   appState.suppressObjectTap = false;
   appState.isRevealInProgress = false;
   resetDragState();
-  window.speechSynthesis.cancel();
+  cancelSpeech();
   objectStage.innerHTML = "";
   answerGrid.innerHTML = "";
   statusText.textContent = "";
@@ -424,7 +434,9 @@ function handleCardPointerDown(event) {
   dragState.maxY = Math.max(stageRect.height - cardRect.height - dragState.baseTop, 0);
   dragState.dragging = false;
 
-  card.setPointerCapture(event.pointerId);
+  if (typeof card.setPointerCapture === "function") {
+    card.setPointerCapture(event.pointerId);
+  }
 }
 
 function handleCardPointerMove(event) {
@@ -480,7 +492,11 @@ function resetDragState() {
     typeof dragState.card.hasPointerCapture === "function" &&
     dragState.card.hasPointerCapture(dragState.pointerId)
   ) {
-    dragState.card.releasePointerCapture(dragState.pointerId);
+    try {
+      dragState.card.releasePointerCapture(dragState.pointerId);
+    } catch {
+      // Pointer capture can already be gone after a browser-level cancellation.
+    }
   }
 
   dragState.card.classList.remove("dragging");
@@ -507,6 +523,14 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function cancelSpeech() {
+  if (!("speechSynthesis" in window)) {
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+}
+
 function speak(text) {
   return new Promise((resolve) => {
     let settled = false;
@@ -520,7 +544,7 @@ function speak(text) {
       resolve();
     };
 
-    if (!("speechSynthesis" in window)) {
+    if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance !== "function") {
       finish();
       return;
     }
@@ -700,7 +724,15 @@ function playCheerSound() {
       return;
     }
 
-    const context = new AudioContextClass();
+    let context;
+
+    try {
+      context = new AudioContextClass();
+    } catch {
+      resolve();
+      return;
+    }
+
     const now = context.currentTime;
     const notes = [523.25, 659.25, 783.99, 1046.5];
 
@@ -723,7 +755,9 @@ function playCheerSound() {
     });
 
     window.setTimeout(() => {
-      context.close().catch(() => {});
+      if (typeof context.close === "function") {
+        context.close().catch(() => {});
+      }
       resolve();
     }, 520);
   });
