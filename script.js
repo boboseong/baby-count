@@ -57,10 +57,55 @@ const COUNTER_WORDS = {
   12: "열두"
 };
 
+const REWARD_GROUPS = {
+  firstTry: [
+    {
+      id: "first-try-star",
+      tier: "first-try",
+      phrase: "한 번에 맞췄어요!",
+      speech: "한 번에 맞췄어요!",
+      symbols: ["⭐", "✨", "🌟", "💛"]
+    },
+    {
+      id: "first-try-pop",
+      tier: "first-try",
+      phrase: "와! 바로 정답!",
+      speech: "바로 정답이에요!",
+      symbols: ["🎉", "✨", "⭐", "💛"]
+    }
+  ],
+  steadyTry: [
+    {
+      id: "steady-try-balloon",
+      tier: "steady-try",
+      phrase: "찾았다! 맞았어요!",
+      speech: "찾았다! 맞았어요!",
+      symbols: ["🎈", "💙", "💛", "💗"]
+    },
+    {
+      id: "steady-try-bounce",
+      tier: "steady-try",
+      phrase: "통통! 잘했어요!",
+      speech: "잘했어요!",
+      symbols: ["👏", "✨", "💚", "⭐"]
+    }
+  ],
+  lastTry: [
+    {
+      id: "last-try-finish",
+      tier: "last-try",
+      phrase: "끝까지 해냈어요!",
+      speech: "끝까지 해냈어요!",
+      symbols: ["🌈", "👏", "💚", "✨"]
+    }
+  ]
+};
+
 const MAX_NUMBER = 5;
 const RANDOM_ITEM_COUNT = 6;
 const PLACEMENT_GAP = 10;
 const RANDOM_PLACEMENT_TRIES = 48;
+const REWARD_PARTICLE_COUNT = 18;
 
 const appState = {
   selectedItem: null,
@@ -68,6 +113,7 @@ const appState = {
   selectedNumber: null,
   playbackToken: 0,
   remainingAnswers: [],
+  answerAttemptCount: 0,
   suppressObjectTap: false,
   isRevealInProgress: false
 };
@@ -138,6 +184,7 @@ backToItemsButton.addEventListener("click", () => {
   appState.selectedItem = null;
   appState.selectedDisplayItem = null;
   appState.selectedNumber = null;
+  appState.answerAttemptCount = 0;
   resetDragState();
   nextPlaybackToken();
   appState.isRevealInProgress = false;
@@ -230,6 +277,7 @@ async function playCounting() {
   objectStage.innerHTML = "";
   answerGrid.innerHTML = "";
   appState.remainingAnswers = Array.from({ length: MAX_NUMBER }, (_, index) => index + 1);
+  appState.answerAttemptCount = 0;
   appState.suppressObjectTap = false;
   statusText.textContent = "";
   resultLabel.textContent = formatCountSummary(item, number);
@@ -290,6 +338,13 @@ async function handleAnswer(number, button) {
     return;
   }
 
+  if (answerGrid.classList.contains("answer-grid--locked")) {
+    return;
+  }
+
+  answerGrid.classList.add("answer-grid--locked");
+  appState.answerAttemptCount += 1;
+
   const token = nextPlaybackToken();
   cancelSpeech();
   statusText.textContent = NUMBER_WORDS[number];
@@ -300,8 +355,7 @@ async function handleAnswer(number, button) {
   }
 
   if (number === appState.selectedNumber) {
-    statusText.textContent = "와! 맞았어요!";
-    await playCheerSound();
+    await playCorrectReward(button, token, appState.answerAttemptCount);
     if (appState.playbackToken !== token) {
       return;
     }
@@ -311,7 +365,92 @@ async function handleAnswer(number, button) {
 
   appState.remainingAnswers = appState.remainingAnswers.filter((value) => value !== number);
   button.remove();
+  answerGrid.classList.remove("answer-grid--locked");
   statusText.textContent = "다시 골라보세요.";
+}
+
+async function playCorrectReward(button, token, attemptCount) {
+  const reward = pickRewardVariant(attemptCount);
+  const overlay = createInstantReward(reward);
+  const cards = Array.from(objectStage.querySelectorAll(".object-card"));
+
+  statusText.textContent = reward.phrase;
+  button.classList.add("correct-answer");
+  objectStage.classList.add("object-stage--celebrate");
+  cards.forEach((card, index) => {
+    card.style.setProperty("--reward-delay", `${Math.min(index * 45, 220)}ms`);
+    card.classList.add("object-card--celebrate");
+  });
+  playStep.appendChild(overlay);
+
+  const soundPromise = playCheerSound();
+  const speechPromise = speak(reward.speech);
+
+  await wait(1500);
+  await Promise.allSettled([soundPromise, speechPromise]);
+
+  if (appState.playbackToken !== token) {
+    return;
+  }
+
+  overlay.remove();
+  objectStage.classList.remove("object-stage--celebrate");
+  cards.forEach((card) => {
+    card.classList.remove("object-card--celebrate");
+    card.style.removeProperty("--reward-delay");
+  });
+  answerGrid.classList.remove("answer-grid--locked");
+}
+
+function pickRewardVariant(attemptCount) {
+  const rewardGroup = getRewardGroup(attemptCount);
+  const rewardIndex = Math.floor(Math.random() * rewardGroup.length);
+  return rewardGroup[rewardIndex];
+}
+
+function getRewardGroup(attemptCount) {
+  if (attemptCount <= 1) {
+    return REWARD_GROUPS.firstTry;
+  }
+
+  if (attemptCount >= MAX_NUMBER) {
+    return REWARD_GROUPS.lastTry;
+  }
+
+  return REWARD_GROUPS.steadyTry;
+}
+
+function createInstantReward(reward) {
+  const overlay = document.createElement("div");
+  overlay.className = `instant-reward instant-reward--${reward.id} instant-reward--${reward.tier}`;
+  overlay.dataset.rewardTier = reward.tier;
+  overlay.setAttribute("aria-hidden", "true");
+
+  const message = document.createElement("div");
+  message.className = "instant-reward-message";
+  message.textContent = reward.phrase;
+  overlay.appendChild(message);
+
+  const displayItem = appState.selectedDisplayItem;
+  const symbols = displayItem ? [displayItem.symbol, ...reward.symbols] : reward.symbols;
+
+  for (let index = 0; index < REWARD_PARTICLE_COUNT; index += 1) {
+    const particle = document.createElement("span");
+    particle.className = "instant-reward-particle";
+    particle.textContent = symbols[index % symbols.length];
+    particle.style.setProperty("--x", `${randomBetween(-42, 42)}vw`);
+    particle.style.setProperty("--y", `${randomBetween(-34, 26)}vh`);
+    particle.style.setProperty("--spin", `${randomBetween(-70, 70)}deg`);
+    particle.style.setProperty("--delay", `${index * 34}ms`);
+    particle.style.setProperty("--size", `${randomBetween(1.3, 2.7).toFixed(2)}rem`);
+    overlay.appendChild(particle);
+  }
+
+  return overlay;
+}
+
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
 }
 
 function addObjectCard(item, index) {
@@ -449,6 +588,7 @@ function resetToHome() {
   appState.selectedNumber = null;
   nextPlaybackToken();
   appState.remainingAnswers = [];
+  appState.answerAttemptCount = 0;
   appState.suppressObjectTap = false;
   appState.isRevealInProgress = false;
   resetDragState();
