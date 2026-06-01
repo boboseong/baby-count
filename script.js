@@ -1,16 +1,22 @@
 const ITEMS = [
-  { id: "rabbit", group: "동물", name: "토끼", symbol: "🐰", counter: "마리" },
-  { id: "pig", group: "동물", name: "돼지", symbol: "🐷", counter: "마리" },
-  { id: "puppy", group: "동물", name: "강아지", symbol: "🐶", counter: "마리" },
-  { id: "cat", group: "동물", name: "고양이", symbol: "🐱", counter: "마리" },
-  { id: "apple", group: "음식", name: "사과", symbol: "🍎", counter: "개" },
-  { id: "strawberry", group: "음식", name: "딸기", symbol: "🍓", counter: "개" },
-  { id: "banana", group: "음식", name: "바나나", symbol: "🍌", counter: "개" },
-  { id: "milk", group: "음식", name: "우유", symbol: "🥛", counter: "컵" },
-  { id: "shoe", group: "물건", name: "신발", symbol: "👟", counter: "켤레" },
-  { id: "clothes", group: "물건", name: "옷", symbol: "👕", counter: "벌" },
-  { id: "car", group: "물건", name: "자동차", symbol: "🚗", counter: "대" },
-  { id: "bag", group: "물건", name: "가방", symbol: "🎒", counter: "개" }
+  { id: "rabbit", name: "토끼", symbol: "🐰", counter: "마리" },
+  { id: "pig", name: "돼지", symbol: "🐷", counter: "마리" },
+  { id: "puppy", name: "강아지", symbol: "🐶", counter: "마리" },
+  { id: "cat", name: "고양이", symbol: "🐱", counter: "마리" },
+  { id: "apple", name: "사과", symbol: "🍎", counter: "개" },
+  { id: "strawberry", name: "딸기", symbol: "🍓", counter: "개" },
+  { id: "banana", name: "바나나", symbol: "🍌", counter: "개" },
+  { id: "milk", name: "우유", symbol: "🥛", counter: "컵" },
+  { id: "shoe", name: "신발", symbol: "👟", counter: "켤레" },
+  { id: "clothes", name: "옷", symbol: "👕", counter: "벌" },
+  { id: "car", name: "자동차", symbol: "🚗", counter: "대" },
+  { id: "bag", name: "가방", symbol: "🎒", counter: "개" }
+];
+
+const SURPRISE_ITEMS = [
+  { name: "곰", symbol: "🧸", counter: "마리" },
+  { name: "쿠키", symbol: "🍪", counter: "개" },
+  { name: "풍선", symbol: "🎈", counter: "개" }
 ];
 
 const NUMBER_WORDS = {
@@ -44,6 +50,8 @@ const COUNTER_WORDS = {
 };
 
 const MAX_NUMBER = 5;
+const PLACEMENT_GAP = 10;
+const RANDOM_PLACEMENT_TRIES = 48;
 
 const appState = {
   selectedItem: null,
@@ -56,6 +64,7 @@ const appState = {
 };
 
 let emojiOverrideItemId = pickEmojiOverrideItemId();
+let emojiOverrideDisplayItem = pickSurpriseItem();
 
 function nextPlaybackToken() {
   appState.playbackToken += 1;
@@ -68,23 +77,23 @@ function pickEmojiOverrideItemId(previousItemId = null) {
   return ids[Math.floor(Math.random() * ids.length)];
 }
 
+function pickSurpriseItem(previousItem = null) {
+  const candidateItems = SURPRISE_ITEMS.filter((item) => item.name !== previousItem?.name);
+  const items = candidateItems.length > 0 ? candidateItems : SURPRISE_ITEMS;
+  return items[Math.floor(Math.random() * items.length)];
+}
+
 function getDisplayItem(item) {
   if (!item || item.id !== emojiOverrideItemId) {
     return item;
   }
 
-  const overrideMap = {
-    동물: { name: "곰", symbol: "🧸", counter: "마리" },
-    음식: { name: "쿠키", symbol: "🍪", counter: "개" },
-    물건: { name: "풍선", symbol: "🎈", counter: "개" }
-  };
-  const override = overrideMap[item.group] || { name: item.name, symbol: "✨", counter: item.counter };
-
-  return { ...item, ...override };
+  return { ...item, ...emojiOverrideDisplayItem };
 }
 
 function refreshHomeEmojiOverride() {
   emojiOverrideItemId = pickEmojiOverrideItemId(emojiOverrideItemId);
+  emojiOverrideDisplayItem = pickSurpriseItem(emojiOverrideDisplayItem);
 
   document.querySelectorAll(".item-button").forEach((button) => {
     const itemId = button.dataset.itemId;
@@ -160,36 +169,18 @@ backToItemsButton.addEventListener("click", () => {
 });
 
 function renderItemSelection() {
-  const groups = [...new Set(ITEMS.map((item) => item.group))];
-
-  groups.forEach((groupName) => {
-    const groupSection = document.createElement("section");
-    groupSection.className = "item-group";
-
-    const title = document.createElement("h3");
-    title.className = "item-group-title";
-    title.textContent = groupName;
-    groupSection.appendChild(title);
-
-    const grid = document.createElement("div");
-    grid.className = "item-grid";
-
-    ITEMS.filter((item) => item.group === groupName).forEach((item) => {
-      const displayItem = getDisplayItem(item);
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "item-button";
-      button.dataset.itemId = item.id;
-      button.innerHTML = [
-        `<span class="item-symbol" aria-hidden="true">${displayItem.symbol}</span>`,
-        `<span class="item-name">${displayItem.name}</span>`
-      ].join("");
-      button.addEventListener("click", () => selectItem(item.id));
-      grid.appendChild(button);
-    });
-
-    groupSection.appendChild(grid);
-    itemGroups.appendChild(groupSection);
+  ITEMS.forEach((item) => {
+    const displayItem = getDisplayItem(item);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "item-button";
+    button.dataset.itemId = item.id;
+    button.innerHTML = [
+      `<span class="item-symbol" aria-hidden="true">${displayItem.symbol}</span>`,
+      `<span class="item-name">${displayItem.name}</span>`
+    ].join("");
+    button.addEventListener("click", () => selectItem(item.id));
+    itemGroups.appendChild(button);
   });
 }
 
@@ -354,6 +345,94 @@ function addObjectCard(item, index) {
     speak(phrase);
   });
   objectStage.appendChild(card);
+  placeObjectCardRandomly(card);
+}
+
+function placeObjectCardRandomly(card) {
+  const maxLeft = Math.max(objectStage.clientWidth - card.offsetWidth, 0);
+  const maxTop = Math.max(objectStage.clientHeight - card.offsetHeight, 0);
+  const existingBoxes = Array.from(objectStage.querySelectorAll(".object-card"))
+    .filter((existingCard) => existingCard !== card)
+    .map(getCardPlacementBox);
+
+  let bestCandidate = createRandomPlacement(maxLeft, maxTop);
+  let bestScore = -1;
+
+  for (let attempt = 0; attempt < RANDOM_PLACEMENT_TRIES; attempt += 1) {
+    const candidate = createRandomPlacement(maxLeft, maxTop);
+    const candidateBox = {
+      left: candidate.left,
+      top: candidate.top,
+      width: card.offsetWidth,
+      height: card.offsetHeight
+    };
+
+    if (!existingBoxes.some((box) => doBoxesOverlap(candidateBox, box, PLACEMENT_GAP))) {
+      setCardBasePosition(card, candidate);
+      return;
+    }
+
+    const score = getPlacementDistanceScore(candidateBox, existingBoxes);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestCandidate = candidate;
+    }
+  }
+
+  setCardBasePosition(card, bestCandidate);
+}
+
+function createRandomPlacement(maxLeft, maxTop) {
+  return {
+    left: Math.round(Math.random() * maxLeft),
+    top: Math.round(Math.random() * maxTop)
+  };
+}
+
+function setCardBasePosition(card, position) {
+  card.style.left = `${position.left}px`;
+  card.style.top = `${position.top}px`;
+}
+
+function getCardPlacementBox(card) {
+  return {
+    left: Number.parseFloat(card.style.left) || 0,
+    top: Number.parseFloat(card.style.top) || 0,
+    width: card.offsetWidth,
+    height: card.offsetHeight
+  };
+}
+
+function doBoxesOverlap(a, b, gap = 0) {
+  return (
+    a.left < b.left + b.width + gap &&
+    a.left + a.width + gap > b.left &&
+    a.top < b.top + b.height + gap &&
+    a.top + a.height + gap > b.top
+  );
+}
+
+function getPlacementDistanceScore(candidate, boxes) {
+  if (boxes.length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const candidateCenter = {
+    x: candidate.left + candidate.width / 2,
+    y: candidate.top + candidate.height / 2
+  };
+
+  return Math.min(
+    ...boxes.map((box) => {
+      const center = {
+        x: box.left + box.width / 2,
+        y: box.top + box.height / 2
+      };
+
+      return Math.hypot(candidateCenter.x - center.x, candidateCenter.y - center.y);
+    })
+  );
 }
 
 function showStep(step) {
