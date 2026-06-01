@@ -3,20 +3,28 @@ const ITEMS = [
   { id: "pig", name: "돼지", symbol: "🐷", counter: "마리" },
   { id: "puppy", name: "강아지", symbol: "🐶", counter: "마리" },
   { id: "cat", name: "고양이", symbol: "🐱", counter: "마리" },
+  { id: "bear", name: "곰", symbol: "🧸", counter: "마리" },
+  { id: "fish", name: "물고기", symbol: "🐟", counter: "마리" },
+  { id: "bird", name: "새", symbol: "🐦", counter: "마리" },
+  { id: "duck", name: "오리", symbol: "🦆", counter: "마리" },
   { id: "apple", name: "사과", symbol: "🍎", counter: "개" },
   { id: "strawberry", name: "딸기", symbol: "🍓", counter: "개" },
   { id: "banana", name: "바나나", symbol: "🍌", counter: "개" },
+  { id: "grape", name: "포도", symbol: "🍇", counter: "송이" },
+  { id: "cookie", name: "쿠키", symbol: "🍪", counter: "개" },
+  { id: "bread", name: "빵", symbol: "🍞", counter: "개" },
   { id: "milk", name: "우유", symbol: "🥛", counter: "컵" },
+  { id: "cup", name: "컵", symbol: "🥤", counter: "개" },
   { id: "shoe", name: "신발", symbol: "👟", counter: "켤레" },
   { id: "clothes", name: "옷", symbol: "👕", counter: "벌" },
+  { id: "flower", name: "꽃", symbol: "🌸", counter: "송이" },
+  { id: "star", name: "별", symbol: "⭐", counter: "개" },
+  { id: "balloon", name: "풍선", symbol: "🎈", counter: "개" },
+  { id: "ball", name: "공", symbol: "⚽", counter: "개" },
   { id: "car", name: "자동차", symbol: "🚗", counter: "대" },
+  { id: "train", name: "기차", symbol: "🚂", counter: "대" },
+  { id: "book", name: "책", symbol: "📘", counter: "권" },
   { id: "bag", name: "가방", symbol: "🎒", counter: "개" }
-];
-
-const SURPRISE_ITEMS = [
-  { name: "곰", symbol: "🧸", counter: "마리" },
-  { name: "쿠키", symbol: "🍪", counter: "개" },
-  { name: "풍선", symbol: "🎈", counter: "개" }
 ];
 
 const NUMBER_WORDS = {
@@ -50,6 +58,7 @@ const COUNTER_WORDS = {
 };
 
 const MAX_NUMBER = 5;
+const RANDOM_ITEM_COUNT = 6;
 const PLACEMENT_GAP = 10;
 const RANDOM_PLACEMENT_TRIES = 48;
 
@@ -63,52 +72,13 @@ const appState = {
   isRevealInProgress: false
 };
 
-let emojiOverrideItemId = pickEmojiOverrideItemId();
-let emojiOverrideDisplayItem = pickSurpriseItem();
-
 function nextPlaybackToken() {
   appState.playbackToken += 1;
   return appState.playbackToken;
 }
 
-function pickEmojiOverrideItemId(previousItemId = null) {
-  const candidateIds = ITEMS.map((item) => item.id).filter((itemId) => itemId !== previousItemId);
-  const ids = candidateIds.length > 0 ? candidateIds : ITEMS.map((item) => item.id);
-  return ids[Math.floor(Math.random() * ids.length)];
-}
-
-function pickSurpriseItem(previousItem = null) {
-  const candidateItems = SURPRISE_ITEMS.filter((item) => item.name !== previousItem?.name);
-  const items = candidateItems.length > 0 ? candidateItems : SURPRISE_ITEMS;
-  return items[Math.floor(Math.random() * items.length)];
-}
-
 function getDisplayItem(item) {
-  if (!item || item.id !== emojiOverrideItemId) {
-    return item;
-  }
-
-  return { ...item, ...emojiOverrideDisplayItem };
-}
-
-function refreshHomeEmojiOverride() {
-  emojiOverrideItemId = pickEmojiOverrideItemId(emojiOverrideItemId);
-  emojiOverrideDisplayItem = pickSurpriseItem(emojiOverrideDisplayItem);
-
-  document.querySelectorAll(".item-button").forEach((button) => {
-    const itemId = button.dataset.itemId;
-    const item = ITEMS.find((entry) => entry.id === itemId);
-    const displayItem = getDisplayItem(item);
-    const symbol = button.querySelector(".item-symbol");
-    const name = button.querySelector(".item-name");
-
-    if (!displayItem || !symbol || !name) {
-      return;
-    }
-
-    symbol.textContent = displayItem.symbol;
-    name.textContent = displayItem.name;
-  });
+  return item;
 }
 
 function formatCountSummary(item, number) {
@@ -117,6 +87,11 @@ function formatCountSummary(item, number) {
 }
 
 function formatObjectTapSpeech(item, number) {
+  const displayItem = getDisplayItem(item);
+  return `${displayItem.name} ${NUMBER_WORDS[number]}`;
+}
+
+function formatCountingStepSpeech(item, number) {
   const displayItem = getDisplayItem(item);
   return `${displayItem.name} ${NUMBER_WORDS[number]}`;
 }
@@ -160,16 +135,34 @@ initObjectCardDragging();
 lockZoomGestures();
 
 backToItemsButton.addEventListener("click", () => {
+  appState.selectedItem = null;
+  appState.selectedDisplayItem = null;
+  appState.selectedNumber = null;
   resetDragState();
   nextPlaybackToken();
   appState.isRevealInProgress = false;
   cancelSpeech();
-  refreshHomeEmojiOverride();
+  selectedItemLabel.textContent = "";
+  syncSelectedButtons(".number-button", null, "number");
+  renderItemSelection();
   showStep("item");
 });
 
+function pickRandomItems(items, count) {
+  const shuffledItems = [...items];
+
+  for (let index = shuffledItems.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffledItems[index], shuffledItems[swapIndex]] = [shuffledItems[swapIndex], shuffledItems[index]];
+  }
+
+  return shuffledItems.slice(0, Math.min(count, shuffledItems.length));
+}
+
 function renderItemSelection() {
-  ITEMS.forEach((item) => {
+  itemGroups.innerHTML = "";
+
+  pickRandomItems(ITEMS, RANDOM_ITEM_COUNT).forEach((item) => {
     const displayItem = getDisplayItem(item);
     const button = document.createElement("button");
     button.type = "button";
@@ -249,8 +242,9 @@ async function playCounting() {
       }
 
       addObjectCard(item, index);
-      statusText.textContent = NUMBER_WORDS[index];
-      await speak(`${NUMBER_WORDS[index]}`);
+      const countPhrase = formatCountingStepSpeech(item, index);
+      statusText.textContent = countPhrase;
+      await speak(countPhrase);
       await wait(380);
     }
 
@@ -464,9 +458,9 @@ function resetToHome() {
   statusText.textContent = "";
   resultLabel.textContent = "";
   selectedItemLabel.textContent = "";
+  renderItemSelection();
   syncSelectedButtons(".item-button", null, "itemId");
   syncSelectedButtons(".number-button", null, "number");
-  refreshHomeEmojiOverride();
   showStep("item");
 }
 
