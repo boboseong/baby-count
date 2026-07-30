@@ -14,7 +14,37 @@
       <button id="fullscreen-button" class="secondary-button" type="button" aria-pressed="false">전체화면</button>
     </header>
 
-    <section id="item-step" class="panel active" aria-labelledby="item-step-title">
+    <section id="mode-step" class="panel active" aria-labelledby="mode-step-title">
+      <h2 id="mode-step-title">어떤 방식으로 놀까요?</h2>
+      <p class="mode-note">보호자가 골라 주세요.</p>
+
+      <div class="mode-list">
+        <button id="mode-classic" class="mode-card" type="button">
+          <span class="mode-card-title">기존 방식 <span class="mode-card-tag">1.1</span></span>
+          <span class="mode-card-desc">앱이 세어 주고, 아이가 정답 숫자를 고릅니다.</span>
+        </button>
+
+        <div class="mode-card-group">
+          <button id="mode-touch" class="mode-card mode-card--primary" type="button">
+            <span class="mode-card-title">새 방식</span>
+            <span class="mode-card-desc">아이가 물체를 하나씩 짚어 셉니다.</span>
+          </button>
+
+          <div class="mode-settings">
+            <div class="mode-setting">
+              <span class="mode-setting-label">세는 개수</span>
+              <div id="count-options" class="mode-setting-options" role="group" aria-label="세는 개수"></div>
+            </div>
+            <div class="mode-setting">
+              <span class="mode-setting-label">물체 배치</span>
+              <div id="layout-options" class="mode-setting-options" role="group" aria-label="물체 배치"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="item-step" class="panel" aria-labelledby="item-step-title" hidden>
       <h2 id="item-step-title">무엇을 셀까요?</h2>
       <div id="item-groups" class="item-groups"></div>
     </section>
@@ -28,6 +58,7 @@
       </div>
       <div id="object-stage" class="object-stage" aria-live="polite"></div>
       <div id="answer-grid" class="answer-grid" aria-label="정답 숫자 선택"></div>
+      <div id="tally-strip" class="tally-strip" aria-hidden="true" hidden></div>
       <p id="status-text" class="status-text"></p>
     </section>
   </main>

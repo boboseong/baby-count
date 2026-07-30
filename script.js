@@ -115,22 +115,41 @@ const REWARD_GROUPS = {
   ]
 };
 
+// Bound of the classic mode: its answer grid and reward tiers are tied to it.
 const MAX_NUMBER = 5;
 const RANDOM_ITEM_COUNT = 6;
 const PLACEMENT_GAP = 10;
 const RANDOM_PLACEMENT_TRIES = 48;
 const REWARD_PARTICLE_COUNT = 18;
 
+const TOUCH_COUNT_CHOICES = [3, 4, 5];
+const TOUCH_LAYOUT_CHOICES = [
+  { id: "rows", label: "규칙적" },
+  { id: "random", label: "무작위" }
+];
+const TOUCH_HINT_DELAY = 3000;
+const SETTINGS_STORAGE_KEY = "baby-count-settings";
+
+const touchSettings = {
+  maxCount: 3,
+  layout: "rows"
+};
+
 const appState = {
+  mode: "classic",
   selectedItem: null,
   selectedDisplayItem: null,
   selectedNumber: null,
   lastNumber: null,
+  lastItemId: null,
   playbackToken: 0,
   remainingAnswers: [],
   answerAttemptCount: 0,
   suppressObjectTap: false,
-  isRevealInProgress: false
+  isRevealInProgress: false,
+  countedCount: 0,
+  countTarget: 0,
+  hintTimerId: null
 };
 
 function nextPlaybackToken() {
@@ -175,20 +194,139 @@ const dragState = {
 
 let preferredSystemVoice = null;
 
+const modeStep = document.getElementById("mode-step");
 const itemStep = document.getElementById("item-step");
 const playStep = document.getElementById("play-step");
 const itemGroups = document.getElementById("item-groups");
 const resultLabel = document.getElementById("result-label");
 const objectStage = document.getElementById("object-stage");
 const answerGrid = document.getElementById("answer-grid");
+const tallyStrip = document.getElementById("tally-strip");
 const statusText = document.getElementById("status-text");
 const fullscreenButton = document.getElementById("fullscreen-button");
+const classicModeButton = document.getElementById("mode-classic");
+const touchModeButton = document.getElementById("mode-touch");
+const countOptions = document.getElementById("count-options");
+const layoutOptions = document.getElementById("layout-options");
 
+loadTouchSettings();
 renderItemSelection();
+initModeSelection();
 initSystemTtsVoice();
 initFullscreenToggle();
 initObjectCardDragging();
 lockZoomGestures();
+showStep("mode");
+
+// Storage access throws outright in some privacy modes, so every touch of it is
+// guarded and simply falls back to the defaults.
+function loadTouchSettings() {
+  let raw = null;
+
+  try {
+    raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+  } catch {
+    return;
+  }
+
+  if (!raw) {
+    return;
+  }
+
+  try {
+    const saved = JSON.parse(raw);
+
+    if (TOUCH_COUNT_CHOICES.includes(saved.maxCount)) {
+      touchSettings.maxCount = saved.maxCount;
+    }
+
+    if (TOUCH_LAYOUT_CHOICES.some((choice) => choice.id === saved.layout)) {
+      touchSettings.layout = saved.layout;
+    }
+  } catch {
+    // A corrupt entry is no reason to block play.
+  }
+}
+
+function saveTouchSettings() {
+  try {
+    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(touchSettings));
+  } catch {
+    // Settings simply do not persist here.
+  }
+}
+
+function initModeSelection() {
+  if (classicModeButton) {
+    classicModeButton.addEventListener("click", () => enterMode("classic"));
+  }
+
+  if (touchModeButton) {
+    touchModeButton.addEventListener("click", () => enterMode("touch"));
+  }
+
+  renderSettingOptions(countOptions, TOUCH_COUNT_CHOICES.map((value) => ({
+    id: String(value),
+    label: `1~${value}`
+  })), () => String(touchSettings.maxCount), (id) => {
+    touchSettings.maxCount = Number(id);
+  });
+
+  renderSettingOptions(layoutOptions, TOUCH_LAYOUT_CHOICES, () => touchSettings.layout, (id) => {
+    touchSettings.layout = id;
+  });
+}
+
+function renderSettingOptions(container, choices, getCurrent, apply) {
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = "";
+
+  choices.forEach((choice) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mode-setting-option";
+    button.dataset.value = choice.id;
+    button.textContent = choice.label;
+    button.addEventListener("click", () => {
+      apply(choice.id);
+      saveTouchSettings();
+      syncSettingOptions(container, getCurrent());
+    });
+    container.appendChild(button);
+  });
+
+  syncSettingOptions(container, getCurrent());
+}
+
+function syncSettingOptions(container, currentValue) {
+  container.querySelectorAll(".mode-setting-option").forEach((button) => {
+    const isSelected = button.dataset.value === currentValue;
+    button.classList.toggle("selected", isSelected);
+    button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+  });
+}
+
+function enterMode(mode) {
+  appState.mode = mode;
+  appState.lastNumber = null;
+  appState.lastItemId = null;
+
+  const isTouch = mode === "touch";
+  answerGrid.hidden = isTouch;
+  tallyStrip.hidden = !isTouch;
+
+  // Reserve the tally row up front for the same reason the answer grid is
+  // reserved: a stage that resizes mid-round clips objects out of view.
+  if (isTouch) {
+    renderTallyStrip(touchSettings.maxCount, 0);
+  }
+
+  renderItemSelection();
+  showStep("item");
+}
 
 function pickRandomItems(items, count) {
   const shuffledItems = [...items];
@@ -201,10 +339,29 @@ function pickRandomItems(items, count) {
   return shuffledItems.slice(0, Math.min(count, shuffledItems.length));
 }
 
+// Repetition is how counting is learned at this age, so the object just counted
+// stays on offer instead of being shuffled away.
+function pickItemsForSelection() {
+  const lastItem = appState.lastItemId
+    ? ITEMS.find((item) => item.id === appState.lastItemId)
+    : null;
+
+  if (!lastItem) {
+    return pickRandomItems(ITEMS, RANDOM_ITEM_COUNT);
+  }
+
+  const others = pickRandomItems(
+    ITEMS.filter((item) => item.id !== lastItem.id),
+    RANDOM_ITEM_COUNT - 1
+  );
+
+  return pickRandomItems([lastItem, ...others], RANDOM_ITEM_COUNT);
+}
+
 function renderItemSelection() {
   itemGroups.innerHTML = "";
 
-  pickRandomItems(ITEMS, RANDOM_ITEM_COUNT).forEach((item) => {
+  pickItemsForSelection().forEach((item) => {
     const displayItem = getDisplayItem(item);
     const button = document.createElement("button");
     button.type = "button";
@@ -228,19 +385,25 @@ function selectItem(itemId) {
     return;
   }
 
-  appState.selectedNumber = pickCountTarget();
+  if (appState.mode === "touch") {
+    appState.selectedNumber = pickCountTarget(touchSettings.maxCount);
+    startTouchRound();
+    return;
+  }
+
+  appState.selectedNumber = pickCountTarget(MAX_NUMBER);
   playCounting();
 }
 
-function pickCountTarget() {
-  if (MAX_NUMBER <= 1) {
+function pickCountTarget(maxCount) {
+  if (maxCount <= 1) {
     return 1;
   }
 
   let number = appState.lastNumber;
 
   while (number === appState.lastNumber) {
-    number = Math.floor(Math.random() * MAX_NUMBER) + 1;
+    number = Math.floor(Math.random() * maxCount) + 1;
   }
 
   appState.lastNumber = number;
@@ -312,6 +475,157 @@ async function playCounting() {
       appState.isRevealInProgress = false;
     }
   }
+}
+
+function startTouchRound() {
+  const item = appState.selectedDisplayItem;
+  const number = appState.selectedNumber;
+
+  if (!item || !number) {
+    return;
+  }
+
+  const token = nextPlaybackToken();
+
+  cancelSpeech();
+  clearTouchHint();
+  objectStage.innerHTML = "";
+  objectStage.classList.remove("object-stage--celebrate");
+  appState.countedCount = 0;
+  appState.countTarget = number;
+  appState.isRevealInProgress = false;
+  statusText.textContent = item.name;
+  resultLabel.textContent = item.name;
+  renderTallyStrip(touchSettings.maxCount, 0);
+  showStep("play");
+
+  // All objects at once: the child cannot judge a quantity that is still
+  // arriving, and the whole set has to be there to be pointed at.
+  const cards = [];
+
+  for (let index = 1; index <= number; index += 1) {
+    cards.push(addObjectCard(item, index));
+  }
+
+  if (touchSettings.layout === "rows") {
+    layoutObjectCardsInRows(cards);
+  }
+
+  speak(item.name);
+  scheduleTouchHint(token);
+}
+
+function handleTouchCount(card) {
+  if (appState.mode !== "touch" || appState.countTarget === 0) {
+    return;
+  }
+
+  if (card.disabled || card.classList.contains("object-card--counted")) {
+    return;
+  }
+
+  clearTouchHint();
+
+  const step = appState.countedCount + 1;
+  appState.countedCount = step;
+
+  // Counted objects leave the pool. Counting the same one twice is the usual
+  // error at this age, and taking it off the board rules it out.
+  card.disabled = true;
+  card.classList.remove("object-card--hint");
+  card.classList.add("object-card--counted");
+
+  // The tone is synchronous so the tap always answers instantly, whatever the
+  // speech engine decides to do.
+  playCountTone(step);
+  renderTallyStrip(touchSettings.maxCount, step);
+
+  const token = nextPlaybackToken();
+  statusText.textContent = NUMBER_WORDS[step];
+  cancelSpeech();
+  speak(NUMBER_WORDS[step]);
+
+  if (step >= appState.countTarget) {
+    finishTouchRound(token);
+    return;
+  }
+
+  scheduleTouchHint(token);
+}
+
+async function finishTouchRound(token) {
+  const item = appState.selectedDisplayItem;
+  const cards = Array.from(objectStage.querySelectorAll(".object-card"));
+
+  appState.countTarget = 0;
+  appState.lastItemId = appState.selectedItem ? appState.selectedItem.id : null;
+
+  objectStage.classList.add("object-stage--celebrate");
+  cards.forEach((card, index) => {
+    card.style.setProperty("--reward-delay", `${Math.min(index * 45, 220)}ms`);
+    card.classList.add("object-card--celebrate");
+  });
+
+  playRoundCompleteChime();
+  await wait(420);
+
+  if (appState.playbackToken !== token) {
+    return;
+  }
+
+  const summary = formatCountSummary(item, appState.selectedNumber);
+  statusText.textContent = summary;
+  cancelSpeech();
+  await speak(summary);
+
+  if (appState.playbackToken !== token) {
+    return;
+  }
+
+  resetToHome();
+}
+
+function renderTallyStrip(slotCount, filledCount) {
+  if (!tallyStrip) {
+    return;
+  }
+
+  tallyStrip.innerHTML = "";
+
+  for (let index = 1; index <= slotCount; index += 1) {
+    const dot = document.createElement("span");
+    dot.className = index <= filledCount ? "tally-dot tally-dot--filled" : "tally-dot";
+    tallyStrip.appendChild(dot);
+  }
+}
+
+function scheduleTouchHint(token) {
+  clearTouchHint();
+
+  appState.hintTimerId = window.setTimeout(() => {
+    appState.hintTimerId = null;
+
+    if (appState.playbackToken !== token || appState.mode !== "touch") {
+      return;
+    }
+
+    const next = objectStage.querySelector(".object-card:not(.object-card--counted)");
+
+    if (next) {
+      next.classList.add("object-card--hint");
+    }
+  }, TOUCH_HINT_DELAY);
+}
+
+function clearTouchHint() {
+  if (appState.hintTimerId !== null) {
+    window.clearTimeout(appState.hintTimerId);
+    appState.hintTimerId = null;
+  }
+
+  objectStage.querySelectorAll(".object-card--hint").forEach((card) => {
+    card.classList.remove("object-card--hint");
+  });
 }
 
 function renderAnswerButtons() {
@@ -476,6 +790,11 @@ function addObjectCard(item, index) {
       return;
     }
 
+    if (appState.mode === "touch") {
+      handleTouchCount(card);
+      return;
+    }
+
     if (appState.isRevealInProgress) {
       nudgeCard(card);
       return;
@@ -487,7 +806,13 @@ function addObjectCard(item, index) {
     speak(phrase);
   });
   objectStage.appendChild(card);
-  placeObjectCardRandomly(card);
+
+  // The rows layout positions every card together once they all exist.
+  if (appState.mode !== "touch" || touchSettings.layout === "random") {
+    placeObjectCardRandomly(card);
+  }
+
+  return card;
 }
 
 function nudgeCard(card) {
@@ -507,14 +832,57 @@ function nudgeCard(card) {
   );
 }
 
-function placeObjectCardRandomly(card) {
-  // Offsets are resolved against the padding box, so the stage padding has to
-  // come off the range or a card can hang over the rounded edge.
+// Offsets are resolved against the padding box, so the stage padding has to
+// come off the range or a card can hang over the rounded edge.
+function getStageInnerSize() {
   const stageStyle = window.getComputedStyle(objectStage);
   const padX = Number.parseFloat(stageStyle.paddingLeft) + Number.parseFloat(stageStyle.paddingRight);
   const padY = Number.parseFloat(stageStyle.paddingTop) + Number.parseFloat(stageStyle.paddingBottom);
-  const maxLeft = Math.max(objectStage.clientWidth - padX - card.offsetWidth, 0);
-  const maxTop = Math.max(objectStage.clientHeight - padY - card.offsetHeight, 0);
+
+  return {
+    width: Math.max(objectStage.clientWidth - padX, 0),
+    height: Math.max(objectStage.clientHeight - padY, 0)
+  };
+}
+
+// Deterministic layout: the same count always lands in the same places, so a
+// small quantity stays perceivable instead of having to be tracked one by one.
+function layoutObjectCardsInRows(cards) {
+  if (cards.length === 0) {
+    return;
+  }
+
+  const inner = getStageInnerSize();
+  const cardWidth = cards[0].offsetWidth;
+  const cardHeight = cards[0].offsetHeight;
+  const perRow = Math.max(
+    1,
+    Math.min(cards.length, Math.floor((inner.width + PLACEMENT_GAP) / (cardWidth + PLACEMENT_GAP)))
+  );
+  const rowCount = Math.ceil(cards.length / perRow);
+  const blockHeight = rowCount * cardHeight + (rowCount - 1) * PLACEMENT_GAP;
+  const maxLeft = Math.max(inner.width - cardWidth, 0);
+  const maxTop = Math.max(inner.height - cardHeight, 0);
+  const startTop = Math.max((inner.height - blockHeight) / 2, 0);
+
+  for (let row = 0; row < rowCount; row += 1) {
+    const rowCards = cards.slice(row * perRow, (row + 1) * perRow);
+    const rowWidth = rowCards.length * cardWidth + (rowCards.length - 1) * PLACEMENT_GAP;
+    const startLeft = Math.max((inner.width - rowWidth) / 2, 0);
+
+    rowCards.forEach((card, column) => {
+      setCardBasePosition(card, {
+        left: Math.round(clamp(startLeft + column * (cardWidth + PLACEMENT_GAP), 0, maxLeft)),
+        top: Math.round(clamp(startTop + row * (cardHeight + PLACEMENT_GAP), 0, maxTop))
+      });
+    });
+  }
+}
+
+function placeObjectCardRandomly(card) {
+  const inner = getStageInnerSize();
+  const maxLeft = Math.max(inner.width - card.offsetWidth, 0);
+  const maxTop = Math.max(inner.height - card.offsetHeight, 0);
   const existingBoxes = Array.from(objectStage.querySelectorAll(".object-card"))
     .filter((existingCard) => existingCard !== card)
     .map(getCardPlacementBox);
@@ -601,6 +969,7 @@ function getPlacementDistanceScore(candidate, boxes) {
 
 function showStep(step) {
   const steps = {
+    mode: modeStep,
     item: itemStep,
     play: playStep
   };
@@ -621,11 +990,19 @@ function resetToHome() {
   appState.answerAttemptCount = 0;
   appState.suppressObjectTap = false;
   appState.isRevealInProgress = false;
+  appState.countedCount = 0;
+  appState.countTarget = 0;
+  clearTouchHint();
   resetDragState();
   cancelSpeech();
   objectStage.innerHTML = "";
+  objectStage.classList.remove("object-stage--celebrate");
   answerGrid.innerHTML = "";
   answerGrid.classList.remove("answer-grid--pending", "answer-grid--locked");
+
+  if (appState.mode === "touch") {
+    renderTallyStrip(touchSettings.maxCount, 0);
+  }
   statusText.textContent = "";
   resultLabel.textContent = "";
   renderItemSelection();
@@ -653,6 +1030,12 @@ function initObjectCardDragging() {
 }
 
 function handleCardPointerDown(event) {
+  // Dragging stays a classic-mode affordance. Once a tap is the counting act, a
+  // tap swallowed as a drag is a count that never happens.
+  if (appState.mode !== "classic") {
+    return;
+  }
+
   const card = event.target.closest(".object-card");
 
   if (!card || !objectStage || dragState.card) {
@@ -957,50 +1340,91 @@ function wait(duration) {
   });
 }
 
+// One context for the whole session. Counting taps need a tone per touch, and
+// building a context per sound is both costly and unreliable on iOS.
+let sharedAudioContext = null;
+
+function getAudioContext() {
+  if (sharedAudioContext) {
+    if (sharedAudioContext.state === "suspended" && typeof sharedAudioContext.resume === "function") {
+      sharedAudioContext.resume().catch(() => {});
+    }
+
+    return sharedAudioContext;
+  }
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContextClass) {
+    return null;
+  }
+
+  try {
+    sharedAudioContext = new AudioContextClass();
+  } catch {
+    return null;
+  }
+
+  return sharedAudioContext;
+}
+
+function playTone(context, frequency, startOffset, duration, peakGain = 0.22) {
+  const start = context.currentTime + startOffset;
+  const end = start + duration;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+
+  oscillator.type = "triangle";
+  oscillator.frequency.setValueAtTime(frequency, start);
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(peakGain, start + 0.03);
+  gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(start);
+  oscillator.stop(end);
+}
+
 function playCheerSound() {
   return new Promise((resolve) => {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    const context = getAudioContext();
 
-    if (!AudioContextClass) {
+    if (!context) {
       resolve();
       return;
     }
 
-    let context;
-
-    try {
-      context = new AudioContextClass();
-    } catch {
-      resolve();
-      return;
-    }
-
-    const now = context.currentTime;
     const notes = [523.25, 659.25, 783.99, 1046.5];
 
     notes.forEach((frequency, index) => {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      const start = now + index * 0.08;
-      const end = start + 0.26;
-
-      oscillator.type = "triangle";
-      oscillator.frequency.setValueAtTime(frequency, start);
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(0.22, start + 0.03);
-      gain.gain.exponentialRampToValueAtTime(0.0001, end);
-
-      oscillator.connect(gain);
-      gain.connect(context.destination);
-      oscillator.start(start);
-      oscillator.stop(end);
+      playTone(context, frequency, index * 0.08, 0.26);
     });
 
-    window.setTimeout(() => {
-      if (typeof context.close === "function") {
-        context.close().catch(() => {});
-      }
-      resolve();
-    }, 520);
+    window.setTimeout(resolve, 520);
   });
+}
+
+// Rising pitch as the count grows, so the child hears the quantity increase.
+function playCountTone(step) {
+  const context = getAudioContext();
+
+  if (!context) {
+    return;
+  }
+
+  const scale = [523.25, 587.33, 659.25, 698.46, 783.99];
+  const frequency = scale[Math.min(Math.max(step - 1, 0), scale.length - 1)];
+  playTone(context, frequency, 0, 0.22, 0.24);
+}
+
+function playRoundCompleteChime() {
+  const context = getAudioContext();
+
+  if (!context) {
+    return;
+  }
+
+  playTone(context, 783.99, 0, 0.2);
+  playTone(context, 1046.5, 0.1, 0.26);
 }
