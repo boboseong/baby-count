@@ -51,50 +51,19 @@ button {
 }
 
 .hero {
-  text-align: center;
-  margin-bottom: 0;
-}
-
-.hero-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-}
-
-.brand-stack {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-width: 0;
+  padding: 0 6px;
 }
 
 .eyebrow {
   margin: 0;
   font-weight: 700;
+  font-size: 1rem;
+  line-height: 1.2;
   color: var(--accent-strong);
-}
-
-.version-label {
-  margin: 0;
-  color: var(--text-soft);
-  font-size: 0.82rem;
-  font-weight: 700;
-  line-height: 1.15;
-}
-
-.hero h1 {
-  margin: clamp(4px, 0.8vh, 8px) 0 0;
-  font-size: clamp(1.7rem, 4.1vw, 2.9rem);
-  line-height: 1.1;
-}
-
-.subtitle {
-  margin: 12px auto 0;
-  max-width: 620px;
-  color: var(--text-soft);
-  font-size: 1.05rem;
 }
 
 .panel {
@@ -148,16 +117,7 @@ button {
   align-content: stretch;
 }
 
-.number-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-  min-height: 0;
-  flex: 1;
-}
-
-.item-button,
-.number-button {
+.item-button {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -174,14 +134,8 @@ button {
   transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
 
-.number-button {
-  min-height: 0;
-}
-
 .item-button:hover,
 .item-button:focus-visible,
-.number-button:hover,
-.number-button:focus-visible,
 .primary-button:hover,
 .primary-button:focus-visible,
 .secondary-button:hover,
@@ -192,8 +146,7 @@ button {
     inset 0 0 0 2px rgba(217, 108, 47, 0.28);
 }
 
-.item-button.selected,
-.number-button.selected {
+.item-button.selected {
   background: linear-gradient(180deg, #fff6de, #ffe4bd);
   box-shadow:
     0 12px 24px rgba(170, 103, 53, 0.18),
@@ -207,23 +160,9 @@ button {
   margin-bottom: 4px;
 }
 
-.item-name,
-.number-label {
-  font-weight: 700;
-}
-
 .item-name {
-  font-size: 0.82rem;
-}
-
-.number-label {
-  display: block;
-  font-size: clamp(2.8rem, 10vh, 5rem);
-  line-height: 1;
-}
-
-.number-subtitle {
-  display: none;
+  font-weight: 700;
+  font-size: 0.95rem;
 }
 
 .primary-button,
@@ -257,46 +196,75 @@ button {
   flex: 1;
 }
 
-.play-hint {
-  margin: 10px 4px 0;
-  color: var(--text-soft);
-  font-size: clamp(0.95rem, 2vw, 1.08rem);
-  font-weight: 700;
-  text-align: center;
-}
-
-.object-hint {
-  color: #8a694f;
-}
-
-.answer-hint {
-  color: var(--accent-strong);
-}
-
 .answer-grid {
   margin-top: 10px;
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 10px;
 }
 
+.answer-grid--pending {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .answer-button {
+  flex: 0 1 calc(20% - 10px);
+  min-width: 96px;
+  min-height: 92px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 6px;
   border: 0;
-  border-radius: 20px;
-  min-height: 68px;
+  border-radius: 22px;
   background: linear-gradient(180deg, #ffd89f, #ffb65d);
   color: #5a2d08;
   box-shadow:
     0 14px 24px rgba(170, 103, 53, 0.2),
     inset 0 0 0 1px rgba(255, 255, 255, 0.34);
-  font-size: clamp(2rem, 6vw, 3rem);
-  font-weight: 700;
   cursor: pointer;
   transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
 }
 
-.answer-button:hover,
-.answer-button:focus-visible {
+.answer-number {
+  font-size: clamp(1.9rem, 5.4vh, 3rem);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.answer-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.answer-dot {
+  width: clamp(7px, 1.1vh, 10px);
+  height: clamp(7px, 1.1vh, 10px);
+  border-radius: 50%;
+  background: #5a2d08;
+  opacity: 0.8;
+}
+
+.answer-button--wrong {
+  background: linear-gradient(180deg, #ece4d9, #ddd1c2);
+  color: #9c8b7a;
+  box-shadow: inset 0 0 0 1px rgba(122, 73, 34, 0.12);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.answer-button--wrong .answer-dot {
+  background: #9c8b7a;
+}
+
+.answer-button:not(:disabled):hover,
+.answer-button:not(:disabled):focus-visible {
   transform: translateY(-2px);
   box-shadow:
     0 16px 28px rgba(170, 103, 53, 0.24),
@@ -315,13 +283,13 @@ button {
 
 .object-card {
   position: absolute;
-  width: clamp(74px, 17%, 128px);
+  width: clamp(88px, 26%, 150px);
   border: 0;
   min-height: 0;
   aspect-ratio: 1;
   display: grid;
   place-items: center;
-  padding: 8px;
+  padding: 6px;
   border-radius: 24px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 245, 231, 0.92));
   box-shadow:
@@ -362,14 +330,32 @@ button {
   animation: object-symbol-cheer 760ms cubic-bezier(0.18, 1.35, 0.34, 1) var(--reward-delay, 0ms) both;
 }
 
+/* The glyph must stay inside its card: an emoji advance box runs ~1.35x its
+   font-size, so the card width is the only safe reference for sizing it. */
 .object-symbol {
-  font-size: clamp(3rem, 11vh, 6rem);
+  font-size: clamp(2.4rem, 8vh, 4.2rem);
   line-height: 1;
 }
 
-.object-name {
-  margin-top: 8px;
-  font-weight: 700;
+@supports (container-type: size) {
+  .object-stage {
+    container-type: size;
+  }
+
+  /* A short stage (phone in landscape) must shrink the cards too, or they
+     overflow it and pile on top of each other. */
+  .object-card {
+    width: clamp(60px, min(26cqw, 32cqh), 150px);
+    container-type: size;
+  }
+
+  .object-symbol {
+    font-size: 56cqw;
+  }
+}
+
+.object-symbol--nudge {
+  animation: object-symbol-nudge 280ms ease-out both;
 }
 
 .status-text {
@@ -509,6 +495,20 @@ button {
 
   100% {
     transform: translateY(0) scale(1.08) rotate(0);
+  }
+}
+
+@keyframes object-symbol-nudge {
+  0% {
+    transform: scale(1) rotate(0);
+  }
+
+  45% {
+    transform: scale(1.18) rotate(-7deg);
+  }
+
+  100% {
+    transform: scale(1) rotate(0);
   }
 }
 
@@ -657,11 +657,10 @@ button {
   }
 
   .item-name {
-    font-size: 0.78rem;
+    font-size: 0.88rem;
   }
 
-  .item-button,
-  .number-button {
+  .item-button {
     border-radius: 18px;
   }
 
@@ -670,12 +669,10 @@ button {
   }
 
   .answer-button {
-    min-height: 58px;
-    border-radius: 16px;
-  }
-
-  .play-hint {
-    font-size: 0.9rem;
+    flex-basis: calc(33.333% - 8px);
+    min-width: 88px;
+    min-height: 82px;
+    border-radius: 18px;
   }
 
   .selected-item-label {
@@ -689,19 +686,33 @@ button {
 }
 
 @media (max-height: 760px) {
-  .hero h1 {
-    font-size: clamp(1.45rem, 3.8vw, 2.2rem);
-  }
-
   .item-symbol {
     font-size: clamp(2.15rem, 6.5vh, 3.4rem);
   }
 
-  .number-label {
-    font-size: clamp(2.3rem, 8.2vh, 4rem);
+  .answer-button {
+    min-height: 76px;
+  }
+}
+
+@media (max-height: 520px) {
+  .answer-button {
+    min-height: 64px;
   }
 
-  .object-symbol {
-    font-size: clamp(2.4rem, 8.4vh, 4.2rem);
+  .status-text {
+    min-height: 30px;
+  }
+
+  /* Fallback for engines without container queries: the stage is very short
+     here, so cap the cards by viewport height instead. */
+  @supports not (container-type: size) {
+    .object-card {
+      width: clamp(56px, 11vh, 96px);
+    }
+
+    .object-symbol {
+      font-size: clamp(1.7rem, 6vh, 3rem);
+    }
   }
 }

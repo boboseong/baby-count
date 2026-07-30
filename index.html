@@ -10,42 +10,23 @@
 <body>
   <main class="app-shell">
     <header class="hero">
-      <div class="hero-top">
-        <div class="brand-stack">
-          <p class="eyebrow">숫자 놀이</p>
-          <p class="version-label">버전 1.1</p>
-        </div>
-        <button id="fullscreen-button" class="secondary-button" type="button" aria-pressed="false">전체화면</button>
-      </div>
-      <h1>크게 보고 세어요</h1>
+      <p class="eyebrow">숫자 놀이</p>
+      <button id="fullscreen-button" class="secondary-button" type="button" aria-pressed="false">전체화면</button>
     </header>
 
     <section id="item-step" class="panel active" aria-labelledby="item-step-title">
-      <h2 id="item-step-title">1. 물체</h2>
+      <h2 id="item-step-title">무엇을 셀까요?</h2>
       <div id="item-groups" class="item-groups"></div>
-    </section>
-
-    <section id="number-step" class="panel" aria-labelledby="number-step-title" hidden>
-      <div class="panel-head">
-        <div>
-          <h2 id="number-step-title">2. 숫자</h2>
-          <p id="selected-item-label" class="selected-item-label"></p>
-        </div>
-        <button id="back-to-items" class="secondary-button" type="button">뒤로</button>
-      </div>
-      <div id="number-grid" class="number-grid"></div>
     </section>
 
     <section id="play-step" class="panel" aria-labelledby="play-step-title" hidden>
       <div class="panel-head">
         <div>
-          <h2 id="play-step-title">3. 세기</h2>
+          <h2 id="play-step-title">몇 개일까요?</h2>
           <p id="result-label" class="selected-item-label"></p>
         </div>
       </div>
-      <p class="play-hint object-hint">그림을 누르면 이름을 다시 말해줘요.</p>
       <div id="object-stage" class="object-stage" aria-live="polite"></div>
-      <p class="play-hint answer-hint">아래 숫자 버튼을 눌러 정답을 골라요.</p>
       <div id="answer-grid" class="answer-grid" aria-label="정답 숫자 선택"></div>
       <p id="status-text" class="status-text"></p>
     </section>

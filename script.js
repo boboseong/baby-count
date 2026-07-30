@@ -125,6 +125,7 @@ const appState = {
   selectedItem: null,
   selectedDisplayItem: null,
   selectedNumber: null,
+  lastNumber: null,
   playbackToken: 0,
   remainingAnswers: [],
   answerAttemptCount: 0,
@@ -156,7 +157,7 @@ function formatCountingStepSpeech(item, number) {
   return `${displayItem.name} ${NUMBER_WORDS[number]}`;
 }
 
-const DRAG_THRESHOLD = 8;
+const DRAG_THRESHOLD = 20;
 
 const dragState = {
   card: null,
@@ -175,39 +176,19 @@ const dragState = {
 let preferredSystemVoice = null;
 
 const itemStep = document.getElementById("item-step");
-const numberStep = document.getElementById("number-step");
 const playStep = document.getElementById("play-step");
 const itemGroups = document.getElementById("item-groups");
-const numberGrid = document.getElementById("number-grid");
-const selectedItemLabel = document.getElementById("selected-item-label");
 const resultLabel = document.getElementById("result-label");
 const objectStage = document.getElementById("object-stage");
 const answerGrid = document.getElementById("answer-grid");
 const statusText = document.getElementById("status-text");
-const backToItemsButton = document.getElementById("back-to-items");
 const fullscreenButton = document.getElementById("fullscreen-button");
 
 renderItemSelection();
-renderNumberSelection();
 initSystemTtsVoice();
 initFullscreenToggle();
 initObjectCardDragging();
 lockZoomGestures();
-
-backToItemsButton.addEventListener("click", () => {
-  appState.selectedItem = null;
-  appState.selectedDisplayItem = null;
-  appState.selectedNumber = null;
-  appState.answerAttemptCount = 0;
-  resetDragState();
-  nextPlaybackToken();
-  appState.isRevealInProgress = false;
-  cancelSpeech();
-  selectedItemLabel.textContent = "";
-  syncSelectedButtons(".number-button", null, "number");
-  renderItemSelection();
-  showStep("item");
-});
 
 function pickRandomItems(items, count) {
   const shuffledItems = [...items];
@@ -238,41 +219,32 @@ function renderItemSelection() {
   });
 }
 
-function renderNumberSelection() {
-  for (let number = 1; number <= MAX_NUMBER; number += 1) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "number-button";
-    button.dataset.number = String(number);
-    button.innerHTML = `<span class="number-label">${number}</span>`;
-    button.addEventListener("click", () => selectNumber(number));
-    numberGrid.appendChild(button);
-  }
-}
-
 function selectItem(itemId) {
   appState.selectedItem = ITEMS.find((item) => item.id === itemId) || null;
   appState.selectedDisplayItem = appState.selectedItem ? getDisplayItem(appState.selectedItem) : null;
-  appState.selectedNumber = null;
   syncSelectedButtons(".item-button", itemId, "itemId");
-  syncSelectedButtons(".number-button", null, "number");
 
   if (!appState.selectedItem) {
     return;
   }
 
-  selectedItemLabel.textContent = appState.selectedDisplayItem.name;
-  showStep("number");
+  appState.selectedNumber = pickCountTarget();
+  playCounting();
 }
 
-function selectNumber(number) {
-  if (!appState.selectedItem || number < 1 || number > MAX_NUMBER) {
-    return;
+function pickCountTarget() {
+  if (MAX_NUMBER <= 1) {
+    return 1;
   }
 
-  appState.selectedNumber = number;
-  syncSelectedButtons(".number-button", String(number), "number");
-  playCounting();
+  let number = appState.lastNumber;
+
+  while (number === appState.lastNumber) {
+    number = Math.floor(Math.random() * MAX_NUMBER) + 1;
+  }
+
+  appState.lastNumber = number;
+  return number;
 }
 
 async function playCounting() {
@@ -293,11 +265,23 @@ async function playCounting() {
   appState.remainingAnswers = Array.from({ length: MAX_NUMBER }, (_, index) => index + 1);
   appState.answerAttemptCount = 0;
   appState.suppressObjectTap = false;
-  statusText.textContent = "";
-  resultLabel.textContent = formatCountSummary(item, number);
+  statusText.textContent = item.name;
+  resultLabel.textContent = item.name;
   showStep("play");
+  // Reserve the answer row before placing any object, otherwise the stage
+  // shrinks mid-round and already-placed objects get clipped out of view.
+  renderAnswerButtons();
+  answerGrid.classList.add("answer-grid--pending");
 
   try {
+    await speak(item.name);
+
+    if (appState.playbackToken !== token) {
+      return;
+    }
+
+    await wait(240);
+
     for (let index = 1; index <= number; index += 1) {
       if (appState.playbackToken !== token) {
         return;
@@ -322,7 +306,7 @@ async function playCounting() {
       return;
     }
 
-    renderAnswerButtons();
+    answerGrid.classList.remove("answer-grid--pending");
   } finally {
     if (appState.playbackToken === token) {
       appState.isRevealInProgress = false;
@@ -341,7 +325,11 @@ function renderAnswerButtons() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "answer-button";
-    button.textContent = String(number);
+    button.dataset.number = String(number);
+    button.innerHTML = [
+      `<span class="answer-number">${number}</span>`,
+      `<span class="answer-dots" aria-hidden="true">${'<span class="answer-dot"></span>'.repeat(number)}</span>`
+    ].join("");
     button.addEventListener("click", () => handleAnswer(number, button));
     answerGrid.appendChild(button);
   });
@@ -352,7 +340,10 @@ async function handleAnswer(number, button) {
     return;
   }
 
-  if (answerGrid.classList.contains("answer-grid--locked")) {
+  if (
+    answerGrid.classList.contains("answer-grid--locked") ||
+    answerGrid.classList.contains("answer-grid--pending")
+  ) {
     return;
   }
 
@@ -378,9 +369,13 @@ async function handleAnswer(number, button) {
   }
 
   appState.remainingAnswers = appState.remainingAnswers.filter((value) => value !== number);
-  button.remove();
+  button.classList.add("answer-button--wrong");
+  button.disabled = true;
   answerGrid.classList.remove("answer-grid--locked");
-  statusText.textContent = "다시 골라보세요.";
+
+  const retryPhrase = "다시 골라보세요.";
+  statusText.textContent = retryPhrase;
+  speak(retryPhrase);
 }
 
 async function playCorrectReward(button, token, attemptCount) {
@@ -481,12 +476,12 @@ function addObjectCard(item, index) {
       return;
     }
 
-    const phrase = formatObjectTapSpeech(item, appState.selectedNumber);
-
     if (appState.isRevealInProgress) {
+      nudgeCard(card);
       return;
     }
 
+    const phrase = formatObjectTapSpeech(item, appState.selectedNumber);
     cancelSpeech();
     statusText.textContent = phrase;
     speak(phrase);
@@ -495,9 +490,31 @@ function addObjectCard(item, index) {
   placeObjectCardRandomly(card);
 }
 
+function nudgeCard(card) {
+  const symbol = card.querySelector(".object-symbol");
+
+  if (!symbol) {
+    return;
+  }
+
+  symbol.classList.remove("object-symbol--nudge");
+  void symbol.offsetWidth;
+  symbol.classList.add("object-symbol--nudge");
+  symbol.addEventListener(
+    "animationend",
+    () => symbol.classList.remove("object-symbol--nudge"),
+    { once: true }
+  );
+}
+
 function placeObjectCardRandomly(card) {
-  const maxLeft = Math.max(objectStage.clientWidth - card.offsetWidth, 0);
-  const maxTop = Math.max(objectStage.clientHeight - card.offsetHeight, 0);
+  // Offsets are resolved against the padding box, so the stage padding has to
+  // come off the range or a card can hang over the rounded edge.
+  const stageStyle = window.getComputedStyle(objectStage);
+  const padX = Number.parseFloat(stageStyle.paddingLeft) + Number.parseFloat(stageStyle.paddingRight);
+  const padY = Number.parseFloat(stageStyle.paddingTop) + Number.parseFloat(stageStyle.paddingBottom);
+  const maxLeft = Math.max(objectStage.clientWidth - padX - card.offsetWidth, 0);
+  const maxTop = Math.max(objectStage.clientHeight - padY - card.offsetHeight, 0);
   const existingBoxes = Array.from(objectStage.querySelectorAll(".object-card"))
     .filter((existingCard) => existingCard !== card)
     .map(getCardPlacementBox);
@@ -585,7 +602,6 @@ function getPlacementDistanceScore(candidate, boxes) {
 function showStep(step) {
   const steps = {
     item: itemStep,
-    number: numberStep,
     play: playStep
   };
 
@@ -609,12 +625,11 @@ function resetToHome() {
   cancelSpeech();
   objectStage.innerHTML = "";
   answerGrid.innerHTML = "";
+  answerGrid.classList.remove("answer-grid--pending", "answer-grid--locked");
   statusText.textContent = "";
   resultLabel.textContent = "";
-  selectedItemLabel.textContent = "";
   renderItemSelection();
   syncSelectedButtons(".item-button", null, "itemId");
-  syncSelectedButtons(".number-button", null, "number");
   showStep("item");
 }
 
