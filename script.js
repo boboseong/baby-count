@@ -127,12 +127,42 @@ const TOUCH_LAYOUT_CHOICES = [
   { id: "rows", label: "규칙적" },
   { id: "random", label: "무작위" }
 ];
+const QUIZ_TYPE_CHOICES = [
+  { id: "quantity", label: "같은 개수" },
+  { id: "numeral", label: "숫자" },
+  { id: "both", label: "함께" },
+  { id: "random", label: "랜덤" },
+  { id: "off", label: "없음" }
+];
+const QUIZ_ASKABLE_TYPES = ["quantity", "numeral", "both"];
+const PENALTY_DELAY_CHOICES = [0, 5, 10];
+const QUIZ_INPUT_LOCK = 500;
+const QUIZ_CORRECT_HOLD = 1200;
+const DEMO_STEP_DELAY = 700;
+const PROGRESS_LOG_LIMIT = 4000;
+const MOVING_AVERAGE_WINDOW = 10;
+const TREND_MAX_COLUMNS = 130;
+
 const TOUCH_HINT_DELAY = 3000;
 const SETTINGS_STORAGE_KEY = "baby-count-settings";
+const PROGRESS_STORAGE_KEY = "baby-count-progress";
 
 const touchSettings = {
   maxCount: 3,
-  layout: "rows"
+  layout: "rows",
+  quizType: "quantity",
+  penaltyDelay: 10
+};
+
+// Counters accumulate for the life of the install and are never trimmed, so
+// per-number accuracy stays exact. Only the bit log used for the trend line is
+// bounded, and it is the one thing that can afford to forget.
+// Declared here, above the init block that calls loadProgress().
+const progress = {
+  byNumber: {},
+  byType: {},
+  total: { ok: 0, count: 0 },
+  log: ""
 };
 
 const appState = {
@@ -149,7 +179,13 @@ const appState = {
   isRevealInProgress: false,
   countedCount: 0,
   countTarget: 0,
-  hintTimerId: null
+  hintTimerId: null,
+  quizPhase: false,
+  quizAnswered: false,
+  quizAnswer: 0,
+  quizType: "quantity",
+  quizLockUntil: 0,
+  penaltyTimerId: null
 };
 
 function nextPlaybackToken() {
@@ -208,15 +244,17 @@ const classicModeButton = document.getElementById("mode-classic");
 const touchModeButton = document.getElementById("mode-touch");
 const countOptions = document.getElementById("count-options");
 const layoutOptions = document.getElementById("layout-options");
+const quizTypeOptions = document.getElementById("quiz-type-options");
+const penaltyOptions = document.getElementById("penalty-options");
+const progressSummary = document.getElementById("progress-summary");
+const numberAccuracy = document.getElementById("number-accuracy");
+const typeAccuracy = document.getElementById("type-accuracy");
+const trendChart = document.getElementById("trend-chart");
+const clearProgressButton = document.getElementById("clear-progress");
 
-loadTouchSettings();
-renderItemSelection();
-initModeSelection();
-initSystemTtsVoice();
-initFullscreenToggle();
-initObjectCardDragging();
-lockZoomGestures();
-showStep("mode");
+// Startup runs at the bottom of the file, below every declaration it touches:
+// these helpers read module-level constants, and calling them from up here would
+// hit the temporal dead zone the moment a saved record existed.
 
 // Storage access throws outright in some privacy modes, so every touch of it is
 // guarded and simply falls back to the defaults.
@@ -243,6 +281,14 @@ function loadTouchSettings() {
     if (TOUCH_LAYOUT_CHOICES.some((choice) => choice.id === saved.layout)) {
       touchSettings.layout = saved.layout;
     }
+
+    if (QUIZ_TYPE_CHOICES.some((choice) => choice.id === saved.quizType)) {
+      touchSettings.quizType = saved.quizType;
+    }
+
+    if (PENALTY_DELAY_CHOICES.includes(saved.penaltyDelay)) {
+      touchSettings.penaltyDelay = saved.penaltyDelay;
+    }
   } catch {
     // A corrupt entry is no reason to block play.
   }
@@ -254,6 +300,113 @@ function saveTouchSettings() {
   } catch {
     // Settings simply do not persist here.
   }
+}
+
+function createProgressBucket() {
+  return { ok: 0, count: 0 };
+}
+
+function loadProgress() {
+  let raw = null;
+
+  try {
+    raw = window.localStorage.getItem(PROGRESS_STORAGE_KEY);
+  } catch {
+    return;
+  }
+
+  if (!raw) {
+    return;
+  }
+
+  try {
+    const saved = JSON.parse(raw);
+    progress.byNumber = sanitizeBuckets(saved.byNumber);
+    progress.byType = sanitizeBuckets(saved.byType);
+
+    const total = sanitizeBucket(saved.total);
+    progress.total = total || createProgressBucket();
+    progress.log = typeof saved.log === "string" ? saved.log.replace(/[^01]/g, "") : "";
+  } catch {
+    clearProgressState();
+  }
+}
+
+function sanitizeBuckets(source) {
+  const result = {};
+
+  if (!source || typeof source !== "object") {
+    return result;
+  }
+
+  Object.keys(source).forEach((key) => {
+    const bucket = sanitizeBucket(source[key]);
+
+    if (bucket) {
+      result[key] = bucket;
+    }
+  });
+
+  return result;
+}
+
+function sanitizeBucket(bucket) {
+  if (!bucket || typeof bucket !== "object") {
+    return null;
+  }
+
+  const ok = Number(bucket.ok);
+  const count = Number(bucket.count);
+
+  if (!Number.isFinite(ok) || !Number.isFinite(count) || count < 0 || ok < 0 || ok > count) {
+    return null;
+  }
+
+  return { ok, count };
+}
+
+function saveProgress() {
+  try {
+    window.localStorage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify(progress));
+  } catch {
+    // The session still plays; only the history is lost.
+  }
+}
+
+function clearProgressState() {
+  progress.byNumber = {};
+  progress.byType = {};
+  progress.total = createProgressBucket();
+  progress.log = "";
+}
+
+function recordQuizResult(quizType, answer, isCorrect) {
+  const numberKey = String(answer);
+
+  progress.byNumber[numberKey] = progress.byNumber[numberKey] || createProgressBucket();
+  progress.byType[quizType] = progress.byType[quizType] || createProgressBucket();
+
+  [progress.byNumber[numberKey], progress.byType[quizType], progress.total].forEach((bucket) => {
+    bucket.count += 1;
+
+    if (isCorrect) {
+      bucket.ok += 1;
+    }
+  });
+
+  progress.log += isCorrect ? "1" : "0";
+
+  if (progress.log.length > PROGRESS_LOG_LIMIT) {
+    progress.log = progress.log.slice(progress.log.length - PROGRESS_LOG_LIMIT);
+  }
+
+  saveProgress();
+}
+
+function clearProgress() {
+  clearProgressState();
+  saveProgress();
+  renderProgressSummary();
 }
 
 function initModeSelection() {
@@ -275,6 +428,334 @@ function initModeSelection() {
   renderSettingOptions(layoutOptions, TOUCH_LAYOUT_CHOICES, () => touchSettings.layout, (id) => {
     touchSettings.layout = id;
   });
+
+  renderSettingOptions(quizTypeOptions, QUIZ_TYPE_CHOICES, () => touchSettings.quizType, (id) => {
+    touchSettings.quizType = id;
+  });
+
+  renderSettingOptions(penaltyOptions, PENALTY_DELAY_CHOICES.map((value) => ({
+    id: String(value),
+    label: value === 0 ? "없음" : `${value}초`
+  })), () => String(touchSettings.penaltyDelay), (id) => {
+    touchSettings.penaltyDelay = Number(id);
+  });
+
+  if (clearProgressButton) {
+    clearProgressButton.addEventListener("click", clearProgress);
+  }
+
+  renderProgressSummary();
+}
+
+function formatAccuracy(bucket) {
+  if (!bucket || bucket.count === 0) {
+    return "—";
+  }
+
+  return `${bucket.ok}/${bucket.count} (${Math.round((bucket.ok / bucket.count) * 100)}%)`;
+}
+
+function renderProgressSummary() {
+  if (progressSummary) {
+    progressSummary.textContent = progress.total.count === 0
+      ? "아직 기록이 없어요."
+      : `전체 ${formatAccuracy(progress.total)} · 우연 수준 50%`;
+  }
+
+  renderNumberAccuracyBars();
+  renderTypeAccuracy();
+  renderMovingAverageChart();
+}
+
+function renderNumberAccuracyBars() {
+  if (!numberAccuracy) {
+    return;
+  }
+
+  numberAccuracy.innerHTML = "";
+
+  // Only numbers that actually came up, so changing the count range never leaves
+  // empty rows behind.
+  const keys = Object.keys(progress.byNumber)
+    .filter((key) => progress.byNumber[key].count > 0)
+    .sort((a, b) => Number(a) - Number(b));
+
+  if (keys.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "accuracy-empty";
+    empty.textContent = "숫자별 기록은 문제를 풀면 쌓여요.";
+    numberAccuracy.appendChild(empty);
+    return;
+  }
+
+  keys.forEach((key) => {
+    const bucket = progress.byNumber[key];
+    const ratio = bucket.ok / bucket.count;
+
+    const row = document.createElement("div");
+    row.className = "accuracy-row";
+
+    const label = document.createElement("span");
+    label.className = "accuracy-label";
+    label.textContent = key;
+    row.appendChild(label);
+
+    const track = document.createElement("span");
+    track.className = "accuracy-track";
+    const bar = document.createElement("span");
+    // One measure across categories, so every bar carries the same hue: a
+    // different colour per number would read as a different kind of thing.
+    bar.className = "accuracy-bar";
+    bar.style.width = `${(ratio * 100).toFixed(1)}%`;
+    track.appendChild(bar);
+    row.appendChild(track);
+
+    const value = document.createElement("span");
+    value.className = "accuracy-value";
+    value.textContent = formatAccuracy(bucket);
+    row.appendChild(value);
+
+    if (bucket.count < 5) {
+      const note = document.createElement("span");
+      note.className = "accuracy-note";
+      note.textContent = "표본 적음";
+      row.appendChild(note);
+    }
+
+    numberAccuracy.appendChild(row);
+  });
+}
+
+function renderTypeAccuracy() {
+  if (!typeAccuracy) {
+    return;
+  }
+
+  typeAccuracy.innerHTML = "";
+
+  QUIZ_ASKABLE_TYPES.forEach((type) => {
+    const bucket = progress.byType[type];
+
+    if (!bucket || bucket.count === 0) {
+      return;
+    }
+
+    const label = QUIZ_TYPE_CHOICES.find((choice) => choice.id === type);
+    const row = document.createElement("p");
+    row.className = "progress-type-row";
+    row.textContent = `${label ? label.label : type} ${formatAccuracy(bucket)}`;
+    typeAccuracy.appendChild(row);
+  });
+}
+
+function computeMovingAverage(log, windowSize) {
+  const points = [];
+
+  if (log.length < windowSize) {
+    return points;
+  }
+
+  let sum = 0;
+
+  for (let index = 0; index < log.length; index += 1) {
+    sum += log[index] === "1" ? 1 : 0;
+
+    if (index >= windowSize) {
+      sum -= log[index - windowSize] === "1" ? 1 : 0;
+    }
+
+    if (index >= windowSize - 1) {
+      points.push({ at: index + 1, value: sum / windowSize });
+    }
+  }
+
+  return points;
+}
+
+// Averaging rather than dropping points, so a long history compresses without
+// inventing or hiding a swing.
+function downsampleSeries(points, maxColumns) {
+  if (points.length <= maxColumns) {
+    return points;
+  }
+
+  const bucketSize = points.length / maxColumns;
+  const result = [];
+
+  for (let index = 0; index < maxColumns; index += 1) {
+    const start = Math.floor(index * bucketSize);
+    const end = Math.min(Math.floor((index + 1) * bucketSize), points.length);
+    const slice = points.slice(start, Math.max(end, start + 1));
+    const sum = slice.reduce((acc, point) => acc + point.value, 0);
+
+    result.push({
+      at: slice[slice.length - 1].at,
+      value: sum / slice.length
+    });
+  }
+
+  return result;
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svgNode(name, attributes) {
+  const node = document.createElementNS(SVG_NS, name);
+
+  Object.entries(attributes).forEach(([key, value]) => {
+    node.setAttribute(key, String(value));
+  });
+
+  return node;
+}
+
+function renderMovingAverageChart() {
+  if (!trendChart) {
+    return;
+  }
+
+  trendChart.innerHTML = "";
+
+  const allPoints = computeMovingAverage(progress.log, MOVING_AVERAGE_WINDOW);
+
+  if (allPoints.length === 0) {
+    const note = document.createElement("p");
+    note.className = "accuracy-empty";
+    note.textContent = `${MOVING_AVERAGE_WINDOW}문제부터 추이가 표시돼요.`;
+    trendChart.appendChild(note);
+    return;
+  }
+
+  const points = downsampleSeries(allPoints, TREND_MAX_COLUMNS);
+  const latest = allPoints[allPoints.length - 1];
+
+  const heading = document.createElement("p");
+  heading.className = "trend-heading";
+  heading.textContent = `최근 ${MOVING_AVERAGE_WINDOW}문제 이동평균 ${Math.round(latest.value * 100)}%`;
+  trendChart.appendChild(heading);
+
+  const width = 300;
+  const height = 132;
+  const pad = { top: 10, right: 12, bottom: 22, left: 34 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+
+  const svg = svgNode("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    class: "trend-svg",
+    role: "img",
+    "aria-label": `10문제 이동평균 추이, 현재 ${Math.round(latest.value * 100)}퍼센트`
+  });
+
+  const xFor = (index) => points.length === 1
+    ? pad.left + plotWidth / 2
+    : pad.left + (index / (points.length - 1)) * plotWidth;
+  const yFor = (value) => pad.top + (1 - value) * plotHeight;
+
+  // Axis rules are solid hairlines; the dash is reserved for the threshold below,
+  // where dashing actually means something.
+  svg.appendChild(svgNode("line", {
+    x1: pad.left, y1: pad.top, x2: pad.left, y2: pad.top + plotHeight, class: "trend-axis"
+  }));
+  svg.appendChild(svgNode("line", {
+    x1: pad.left, y1: pad.top + plotHeight, x2: pad.left + plotWidth, y2: pad.top + plotHeight,
+    class: "trend-axis"
+  }));
+
+  [0, 0.5, 1].forEach((value) => {
+    const tick = svgNode("text", {
+      x: pad.left - 6, y: yFor(value) + 3.5, class: "trend-tick", "text-anchor": "end"
+    });
+    tick.textContent = `${value * 100}%`;
+    svg.appendChild(tick);
+  });
+
+  svg.appendChild(svgNode("line", {
+    x1: pad.left, y1: yFor(0.5), x2: pad.left + plotWidth, y2: yFor(0.5), class: "trend-chance"
+  }));
+  const chanceLabel = svgNode("text", {
+    x: pad.left + plotWidth, y: yFor(0.5) - 5, class: "trend-chance-label", "text-anchor": "end"
+  });
+  chanceLabel.textContent = "우연 50%";
+  svg.appendChild(chanceLabel);
+
+  const path = points
+    .map((point, index) => `${index === 0 ? "M" : "L"}${xFor(index).toFixed(1)} ${yFor(point.value).toFixed(1)}`)
+    .join(" ");
+  svg.appendChild(svgNode("path", { d: path, class: "trend-line" }));
+
+  // Only the endpoint is labelled; a value on every point would be unreadable.
+  svg.appendChild(svgNode("circle", {
+    cx: xFor(points.length - 1), cy: yFor(points[points.length - 1].value), r: 4, class: "trend-endpoint"
+  }));
+
+  // Labels come from the full series, not the downsampled buckets, so the axis
+  // states the real range.
+  [allPoints[0].at, latest.at].forEach((at, index) => {
+    const label = svgNode("text", {
+      x: index === 0 ? pad.left : pad.left + plotWidth,
+      y: height - 6,
+      class: "trend-tick",
+      "text-anchor": index === 0 ? "start" : "end"
+    });
+    label.textContent = `${at}번`;
+    svg.appendChild(label);
+  });
+
+  trendChart.appendChild(svg);
+  attachTrendTooltip(svg, points, { xFor, yFor, pad, plotWidth, plotHeight });
+}
+
+// Nearest-point readout across the whole plot height, so the parent does not have
+// to land on a 4px dot.
+function attachTrendTooltip(svg, points, geometry) {
+  const tooltip = document.createElement("div");
+  tooltip.className = "trend-tooltip";
+  tooltip.hidden = true;
+  trendChart.appendChild(tooltip);
+
+  const marker = svgNode("circle", { cx: 0, cy: 0, r: 5, class: "trend-marker" });
+  marker.setAttribute("visibility", "hidden");
+  svg.appendChild(marker);
+
+  const show = (event) => {
+    const rect = svg.getBoundingClientRect();
+
+    if (rect.width === 0) {
+      return;
+    }
+
+    const localX = ((event.clientX - rect.left) / rect.width) * 300;
+    let bestIndex = 0;
+    let bestDistance = Infinity;
+
+    points.forEach((point, index) => {
+      const distance = Math.abs(geometry.xFor(index) - localX);
+
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    });
+
+    const point = points[bestIndex];
+    marker.setAttribute("cx", String(geometry.xFor(bestIndex)));
+    marker.setAttribute("cy", String(geometry.yFor(point.value)));
+    marker.setAttribute("visibility", "visible");
+
+    tooltip.hidden = false;
+    tooltip.textContent = `${point.at}번 · ${Math.round(point.value * 100)}%`;
+    tooltip.style.left = `${(geometry.xFor(bestIndex) / 300) * rect.width}px`;
+  };
+
+  const hide = () => {
+    tooltip.hidden = true;
+    marker.setAttribute("visibility", "hidden");
+  };
+
+  svg.addEventListener("pointermove", show);
+  svg.addEventListener("pointerdown", show);
+  svg.addEventListener("pointerleave", hide);
 }
 
 function renderSettingOptions(container, choices, getCurrent, apply) {
@@ -489,6 +970,7 @@ function startTouchRound() {
 
   cancelSpeech();
   clearTouchHint();
+  clearQuiz();
   objectStage.innerHTML = "";
   objectStage.classList.remove("object-stage--celebrate");
   appState.countedCount = 0;
@@ -516,7 +998,7 @@ function startTouchRound() {
 }
 
 function handleTouchCount(card) {
-  if (appState.mode !== "touch" || appState.countTarget === 0) {
+  if (appState.mode !== "touch" || appState.countTarget === 0 || appState.quizPhase) {
     return;
   }
 
@@ -582,7 +1064,397 @@ async function finishTouchRound(token) {
     return;
   }
 
+  if (touchSettings.quizType === "off") {
+    resetToHome();
+    return;
+  }
+
+  startQuiz(token);
+}
+
+function resolveQuizType() {
+  if (touchSettings.quizType !== "random") {
+    return touchSettings.quizType;
+  }
+
+  const index = Math.floor(Math.random() * QUIZ_ASKABLE_TYPES.length);
+  return QUIZ_ASKABLE_TYPES[index];
+}
+
+// The distractor carries the difficulty. A gap of 2 or more is discriminable by
+// sight; a gap of 1 forces an actual count, so it is only used when the range
+// leaves no other option.
+function pickDistractor(answer, maxCount) {
+  const far = [];
+  const near = [];
+
+  for (let value = 1; value <= maxCount; value += 1) {
+    if (value === answer) {
+      continue;
+    }
+
+    if (Math.abs(value - answer) >= 2) {
+      far.push(value);
+    } else {
+      near.push(value);
+    }
+  }
+
+  const pool = far.length > 0 ? far : near;
+
+  if (pool.length === 0) {
+    return answer === 1 ? 2 : answer - 1;
+  }
+
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+async function startQuiz(token) {
+  const item = appState.selectedDisplayItem;
+  const answer = appState.selectedNumber;
+
+  if (!item || !answer) {
+    resetToHome();
+    return;
+  }
+
+  appState.quizPhase = true;
+  appState.quizAnswered = false;
+  appState.quizAnswer = answer;
+  appState.quizType = resolveQuizType();
+  appState.quizLockUntil = Date.now() + QUIZ_INPUT_LOCK;
+
+  // Emptying the tally removes the shortcut: with the dots still filled the
+  // child could copy their count straight onto a choice card.
+  renderTallyStrip(touchSettings.maxCount, 0);
+
+  objectStage.classList.remove("object-stage--celebrate");
+  const referenceCards = Array.from(objectStage.querySelectorAll(".object-card"));
+  referenceCards.forEach((card) => {
+    card.classList.remove("object-card--celebrate");
+    card.style.removeProperty("--reward-delay");
+    card.classList.add("object-card--reference");
+  });
+
+  const distractor = pickDistractor(answer, touchSettings.maxCount);
+  const values = Math.random() < 0.5 ? [answer, distractor] : [distractor, answer];
+  const choices = values.map((value) => buildQuizChoice(item, value, value === answer));
+
+  // The prompt is set before laying out: it is taller than a number word, and a
+  // status line that grows afterwards would shrink the stage under the cards.
+  const prompt = appState.quizType === "quantity" ? "같은 건 어디 있을까요?" : "몇 개일까요?";
+  statusText.textContent = prompt;
+
+  choices.forEach((choice) => objectStage.appendChild(choice));
+  layoutQuizPhase(referenceCards, choices);
+
+  cancelSpeech();
+  speak(prompt);
+}
+
+function buildQuizChoice(item, value, isCorrect) {
+  const choice = document.createElement("button");
+  choice.type = "button";
+  choice.className = "quiz-choice";
+  choice.dataset.value = String(value);
+  choice.dataset.correct = isCorrect ? "true" : "false";
+
+  if (appState.quizType === "quantity") {
+    const glyphs = document.createElement("span");
+    glyphs.className = "quiz-choice-glyphs";
+    glyphs.setAttribute("aria-hidden", "true");
+
+    for (let index = 0; index < value; index += 1) {
+      const glyph = document.createElement("span");
+      glyph.className = "quiz-choice-glyph";
+      glyph.textContent = item.symbol;
+      glyphs.appendChild(glyph);
+    }
+
+    choice.appendChild(glyphs);
+    choice.setAttribute("aria-label", `${item.name} ${value}개`);
+  } else {
+    const numeral = document.createElement("span");
+    numeral.className = "answer-number";
+    numeral.textContent = String(value);
+    choice.appendChild(numeral);
+
+    if (appState.quizType === "both") {
+      const dots = document.createElement("span");
+      dots.className = "answer-dots";
+      dots.setAttribute("aria-hidden", "true");
+
+      for (let index = 0; index < value; index += 1) {
+        const dot = document.createElement("span");
+        dot.className = "answer-dot";
+        dots.appendChild(dot);
+      }
+
+      choice.appendChild(dots);
+    }
+
+    choice.setAttribute("aria-label", String(value));
+  }
+
+  choice.addEventListener("click", () => handleQuizChoice(choice));
+  return choice;
+}
+
+// Reference and choices share the stage, so nothing outside it changes height and
+// the already-placed objects cannot be clipped by a mid-round resize.
+function layoutQuizPhase(referenceCards, choices) {
+  const inner = getStageInnerSize();
+  const sideBySide = inner.height < 260;
+  const referenceBand = sideBySide
+    ? { left: 0, top: 0, width: inner.width * 0.34, height: inner.height }
+    : { left: 0, top: 0, width: inner.width, height: inner.height * 0.36 };
+  const choiceBand = sideBySide
+    ? { left: inner.width * 0.36, top: 0, width: inner.width * 0.64, height: inner.height }
+    : { left: 0, top: inner.height * 0.4, width: inner.width, height: inner.height * 0.6 };
+
+  layoutCardsInBand(referenceCards, referenceBand);
+
+  const choiceGap = Math.max(PLACEMENT_GAP, Math.round(choiceBand.width * 0.04));
+  const choiceWidth = Math.max(
+    Math.floor((choiceBand.width - choiceGap) / 2),
+    1
+  );
+  const choiceHeight = Math.max(Math.floor(choiceBand.height * (sideBySide ? 0.82 : 0.86)), 1);
+  const choiceTop = choiceBand.top + (choiceBand.height - choiceHeight) / 2;
+
+  choices.forEach((choice, index) => {
+    choice.style.width = `${choiceWidth}px`;
+    choice.style.height = `${choiceHeight}px`;
+    choice.style.left = `${Math.round(choiceBand.left + index * (choiceWidth + choiceGap))}px`;
+    choice.style.top = `${Math.round(choiceTop)}px`;
+    sizeQuizChoiceContents(choice, choiceWidth, choiceHeight);
+  });
+}
+
+// Contents are sized from the measured card rather than container units so the
+// glyphs cannot spill out of a short card.
+function sizeQuizChoiceContents(choice, width, height) {
+  const count = Number(choice.dataset.value) || 1;
+  const columns = Math.min(count, Math.ceil(Math.sqrt(count)));
+  const rows = Math.ceil(count / columns);
+  const available = { width: width - 20, height: height - 20 };
+  // An emoji's advance box runs about 1.35x its font-size, so the width budget
+  // has to be divided by that or the glyphs spill out of the card.
+  const glyph = Math.floor(Math.min(
+    (available.width / columns - 4) / 1.35,
+    (available.height / rows - 4) / 1.05
+  ));
+
+  choice.style.setProperty("--quiz-cols", String(columns));
+  choice.style.setProperty("--quiz-glyph", `${Math.max(glyph, 13)}px`);
+  choice.style.setProperty("--quiz-numeral", `${Math.max(Math.floor(height * 0.4), 22)}px`);
+}
+
+function layoutCardsInBand(cards, band) {
+  if (cards.length === 0) {
+    return;
+  }
+
+  const scale = 0.6;
+  const cardWidth = cards[0].offsetWidth * scale;
+  const gap = Math.max(6, Math.round(cardWidth * 0.12));
+  const perRow = Math.max(
+    1,
+    Math.min(cards.length, Math.floor((band.width + gap) / (cardWidth + gap)))
+  );
+  const rowCount = Math.ceil(cards.length / perRow);
+  const blockHeight = rowCount * cardWidth + (rowCount - 1) * gap;
+  const startTop = band.top + Math.max((band.height - blockHeight) / 2, 0);
+
+  for (let row = 0; row < rowCount; row += 1) {
+    const rowCards = cards.slice(row * perRow, (row + 1) * perRow);
+    const rowWidth = rowCards.length * cardWidth + (rowCards.length - 1) * gap;
+    const startLeft = band.left + Math.max((band.width - rowWidth) / 2, 0);
+
+    rowCards.forEach((card, column) => {
+      card.style.setProperty("--reference-scale", String(scale));
+      setCardBasePosition(card, {
+        left: Math.round(startLeft + column * (cardWidth + gap)),
+        top: Math.round(startTop + row * (cardWidth + gap))
+      });
+    });
+  }
+}
+
+async function handleQuizChoice(choice) {
+  if (!appState.quizPhase || appState.quizAnswered) {
+    return;
+  }
+
+  // A child already tapping when the choices land would otherwise have that tap
+  // recorded as an answer.
+  if (Date.now() < appState.quizLockUntil) {
+    return;
+  }
+
+  appState.quizAnswered = true;
+
+  const token = nextPlaybackToken();
+  const isCorrect = choice.dataset.correct === "true";
+
+  recordQuizResult(appState.quizType, appState.quizAnswer, isCorrect);
+  renderProgressSummary();
+
+  objectStage.querySelectorAll(".quiz-choice").forEach((node) => {
+    node.disabled = true;
+  });
+
+  if (isCorrect) {
+    await playQuizCorrect(choice, token);
+    return;
+  }
+
+  await playQuizPenalty(choice, token);
+}
+
+async function playQuizCorrect(choice, token) {
+  const referenceCards = Array.from(objectStage.querySelectorAll(".object-card"));
+
+  choice.classList.add("quiz-choice--correct");
+  objectStage.classList.add("object-stage--celebrate");
+  referenceCards.forEach((card, index) => {
+    card.style.setProperty("--reward-delay", `${Math.min(index * 45, 220)}ms`);
+    card.classList.add("object-card--celebrate");
+  });
+
+  playRoundCompleteChime();
+  statusText.textContent = "맞았어요!";
+  cancelSpeech();
+  speak("맞았어요!");
+
+  await wait(QUIZ_CORRECT_HOLD);
+
+  if (appState.playbackToken !== token) {
+    return;
+  }
+
   resetToHome();
+}
+
+async function playQuizPenalty(choice, token) {
+  const context = getAudioContext();
+
+  choice.classList.add("quiz-choice--wrong");
+
+  if (context) {
+    playTone(context, 220, 0, 0.18, 0.16);
+    playTone(context, 165, 0.16, 0.26, 0.16);
+  }
+
+  statusText.textContent = "다시 세어 볼까요?";
+  cancelSpeech();
+  await speak("다시 세어 볼까요?");
+
+  if (appState.playbackToken !== token) {
+    return;
+  }
+
+  const correctChoice = objectStage.querySelector('.quiz-choice[data-correct="true"]');
+
+  if (correctChoice) {
+    correctChoice.classList.add("quiz-choice--reveal");
+  }
+
+  await demonstrateCorrectCount(token);
+
+  if (appState.playbackToken !== token) {
+    return;
+  }
+
+  await waitOutPenalty(token);
+
+  if (appState.playbackToken !== token) {
+    return;
+  }
+
+  resetToHome();
+}
+
+// The correction is the teaching part of the penalty: the app counts the set
+// again so the child sees where the answer comes from.
+async function demonstrateCorrectCount(token) {
+  const cards = Array.from(objectStage.querySelectorAll(".object-card"));
+
+  cards.forEach((card) => card.classList.remove("object-card--counted"));
+
+  for (let index = 0; index < cards.length; index += 1) {
+    if (appState.playbackToken !== token) {
+      return;
+    }
+
+    const step = index + 1;
+    cards[index].classList.add("object-card--counted");
+    playCountTone(step);
+    statusText.textContent = NUMBER_WORDS[step];
+    cancelSpeech();
+    speak(NUMBER_WORDS[step]);
+    await wait(DEMO_STEP_DELAY);
+  }
+
+  if (appState.playbackToken !== token) {
+    return;
+  }
+
+  const summary = formatCountSummary(appState.selectedDisplayItem, appState.quizAnswer);
+  statusText.textContent = summary;
+  cancelSpeech();
+  await speak(summary);
+}
+
+// The cost of a wrong answer is time. It has to be visible or the child reads a
+// silent screen as a broken app.
+function waitOutPenalty(token) {
+  const seconds = touchSettings.penaltyDelay;
+
+  if (seconds <= 0) {
+    return Promise.resolve();
+  }
+
+  const timer = document.createElement("div");
+  timer.className = "penalty-timer";
+  timer.setAttribute("aria-hidden", "true");
+  timer.style.setProperty("--penalty-duration", `${seconds}s`);
+
+  const fill = document.createElement("div");
+  fill.className = "penalty-timer-fill";
+  timer.appendChild(fill);
+  objectStage.appendChild(timer);
+
+  return new Promise((resolve) => {
+    appState.penaltyTimerId = window.setTimeout(() => {
+      appState.penaltyTimerId = null;
+      timer.remove();
+      resolve();
+    }, seconds * 1000);
+
+    if (appState.playbackToken !== token) {
+      clearPenaltyTimer();
+      timer.remove();
+      resolve();
+    }
+  });
+}
+
+function clearPenaltyTimer() {
+  if (appState.penaltyTimerId !== null) {
+    window.clearTimeout(appState.penaltyTimerId);
+    appState.penaltyTimerId = null;
+  }
+}
+
+function clearQuiz() {
+  clearPenaltyTimer();
+  appState.quizPhase = false;
+  appState.quizAnswered = false;
+  appState.quizAnswer = 0;
+  appState.quizLockUntil = 0;
+  objectStage.querySelectorAll(".quiz-choice").forEach((node) => node.remove());
+  objectStage.querySelectorAll(".penalty-timer").forEach((node) => node.remove());
 }
 
 function renderTallyStrip(slotCount, filledCount) {
@@ -993,6 +1865,7 @@ function resetToHome() {
   appState.countedCount = 0;
   appState.countTarget = 0;
   clearTouchHint();
+  clearQuiz();
   resetDragState();
   cancelSpeech();
   objectStage.innerHTML = "";
@@ -1428,3 +2301,13 @@ function playRoundCompleteChime() {
   playTone(context, 783.99, 0, 0.2);
   playTone(context, 1046.5, 0.1, 0.26);
 }
+
+loadTouchSettings();
+loadProgress();
+renderItemSelection();
+initModeSelection();
+initSystemTtsVoice();
+initFullscreenToggle();
+initObjectCardDragging();
+lockZoomGestures();
+showStep("mode");

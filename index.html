@@ -39,6 +39,26 @@
               <span class="mode-setting-label">물체 배치</span>
               <div id="layout-options" class="mode-setting-options" role="group" aria-label="물체 배치"></div>
             </div>
+            <div class="mode-setting">
+              <span class="mode-setting-label">확인 문제</span>
+              <div id="quiz-type-options" class="mode-setting-options" role="group" aria-label="확인 문제 형식"></div>
+            </div>
+            <div class="mode-setting">
+              <span class="mode-setting-label">틀렸을 때 기다리기</span>
+              <div id="penalty-options" class="mode-setting-options" role="group" aria-label="틀렸을 때 기다리는 시간"></div>
+            </div>
+          </div>
+
+          <div class="progress-block">
+            <div class="progress-head">
+              <h3 class="progress-title">수행 기록</h3>
+              <button id="clear-progress" class="secondary-button" type="button">기록 지우기</button>
+            </div>
+            <p id="progress-summary" class="progress-summary"></p>
+            <p class="progress-caption">숫자별 정답률</p>
+            <div id="number-accuracy" class="number-accuracy"></div>
+            <div id="trend-chart" class="trend-chart"></div>
+            <div id="type-accuracy" class="type-accuracy"></div>
           </div>
         </div>
       </div>

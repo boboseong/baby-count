@@ -235,6 +235,204 @@ button {
   box-shadow: none;
 }
 
+/* The record is read by the grown-up, so it stays restrained on purpose: thin
+   bars, hairline axes, no toy styling. */
+.progress-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(201, 145, 98, 0.22);
+}
+
+.progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.progress-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.progress-head .secondary-button {
+  padding: 6px 11px;
+  font-size: 0.82rem;
+}
+
+.progress-summary {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.progress-caption {
+  margin: 4px 0 0;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.number-accuracy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.accuracy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.accuracy-label {
+  width: 1.4em;
+  color: var(--text-main);
+  font-size: 0.9rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.accuracy-track {
+  position: relative;
+  flex: 1;
+  height: 10px;
+  min-width: 0;
+  border-radius: 999px;
+  background: rgba(217, 108, 47, 0.12);
+  overflow: hidden;
+}
+
+/* Dashed marks the chance threshold. Gridlines and axes stay solid hairlines. */
+.accuracy-track::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  border-left: 1px dashed rgba(123, 91, 71, 0.55);
+}
+
+.accuracy-bar {
+  display: block;
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+  background: var(--accent);
+}
+
+.accuracy-value {
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.accuracy-note {
+  color: #9c8b7a;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.accuracy-empty {
+  margin: 2px 0;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.trend-chart {
+  position: relative;
+  margin-top: 4px;
+}
+
+.trend-heading {
+  margin: 0 0 2px;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.trend-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.trend-axis {
+  stroke: rgba(123, 91, 71, 0.3);
+  stroke-width: 1;
+}
+
+.trend-chance {
+  stroke: rgba(123, 91, 71, 0.55);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.trend-chance-label,
+.trend-tick {
+  fill: var(--text-soft);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.trend-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.trend-endpoint,
+.trend-marker {
+  fill: var(--accent);
+  stroke: #fffcf9;
+  stroke-width: 2;
+}
+
+.trend-tooltip {
+  position: absolute;
+  top: 18px;
+  transform: translateX(-50%);
+  padding: 3px 7px;
+  border-radius: 8px;
+  background: rgba(67, 40, 24, 0.9);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.trend-tooltip[hidden] {
+  display: none;
+}
+
+.type-accuracy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+}
+
+.progress-type-row {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .item-groups {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -475,6 +673,104 @@ button {
   animation: object-card-hint 1100ms ease-in-out infinite;
 }
 
+/* Quiz phase lives inside the stage, so nothing outside it changes size and the
+   placed objects can never be clipped by a mid-round resize. */
+.object-card--reference {
+  opacity: 1;
+  /* pop-in fills forwards, and a filled animation value beats a normal
+     declaration — the animation has to be dropped for this scale to take. */
+  animation: none;
+  transform: scale(var(--reference-scale, 0.6));
+  transform-origin: top left;
+  transition: transform 260ms ease, left 260ms ease, top 260ms ease;
+}
+
+.quiz-choice {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  border: 0;
+  border-radius: 24px;
+  background: linear-gradient(180deg, #fffef8, #ffeccd);
+  color: var(--text-main);
+  box-shadow:
+    0 10px 20px rgba(170, 103, 53, 0.18),
+    inset 0 0 0 2px rgba(217, 108, 47, 0.24);
+  cursor: pointer;
+  overflow: hidden;
+  animation: quiz-choice-in 280ms cubic-bezier(0.2, 1.3, 0.35, 1) both;
+}
+
+/* A grid here, while the reference set on the stage sits in rows: the two must
+   not look alike, or the answer can be found by matching shapes. */
+.quiz-choice-glyphs {
+  display: grid;
+  grid-template-columns: repeat(var(--quiz-cols, 2), auto);
+  align-items: center;
+  justify-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.quiz-choice-glyph {
+  font-size: var(--quiz-glyph, 1.6rem);
+  line-height: 1;
+}
+
+.quiz-choice .answer-number {
+  font-size: var(--quiz-numeral, 2.4rem);
+}
+
+.quiz-choice--correct {
+  background: linear-gradient(180deg, #e6fbf3, #b6f0dd);
+  box-shadow:
+    0 12px 22px rgba(37, 98, 85, 0.2),
+    inset 0 0 0 3px rgba(73, 212, 187, 0.66);
+  animation: quiz-choice-pop 520ms cubic-bezier(0.2, 1.3, 0.35, 1) both;
+}
+
+.quiz-choice--wrong {
+  background: linear-gradient(180deg, #ece4d9, #ddd1c2);
+  color: #9c8b7a;
+  box-shadow: inset 0 0 0 2px rgba(122, 73, 34, 0.16);
+  animation: quiz-choice-shake 320ms ease-in-out both;
+}
+
+.quiz-choice--wrong .answer-dot {
+  background: #9c8b7a;
+}
+
+.quiz-choice--reveal {
+  box-shadow:
+    0 12px 22px rgba(37, 98, 85, 0.18),
+    inset 0 0 0 3px rgba(73, 212, 187, 0.7);
+}
+
+.penalty-timer {
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(217, 108, 47, 0.16);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.penalty-timer-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  transform-origin: left center;
+  animation: penalty-drain var(--penalty-duration, 10s) linear both;
+}
+
 .tally-strip {
   margin-top: 10px;
   min-height: 44px;
@@ -687,6 +983,57 @@ button {
 
   100% {
     transform: translateY(0) scale(1.08) rotate(0);
+  }
+}
+
+@keyframes quiz-choice-in {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.92);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes quiz-choice-pop {
+  0% {
+    transform: scale(1);
+  }
+
+  45% {
+    transform: scale(1.08);
+  }
+
+  100% {
+    transform: scale(1.03);
+  }
+}
+
+@keyframes quiz-choice-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  25% {
+    transform: translateX(-6px);
+  }
+
+  75% {
+    transform: translateX(6px);
+  }
+}
+
+@keyframes penalty-drain {
+  0% {
+    transform: scaleX(1);
+  }
+
+  100% {
+    transform: scaleX(0);
   }
 }
 
