@@ -53,7 +53,15 @@ const NUMBER_WORDS = {
   9: "아홉",
   10: "열",
   11: "열하나",
-  12: "열둘"
+  12: "열둘",
+  13: "열셋",
+  14: "열넷",
+  15: "열다섯",
+  16: "열여섯",
+  17: "열일곱",
+  18: "열여덟",
+  19: "열아홉",
+  20: "스물"
 };
 
 const COUNTER_WORDS = {
@@ -68,7 +76,15 @@ const COUNTER_WORDS = {
   9: "아홉",
   10: "열",
   11: "열한",
-  12: "열두"
+  12: "열두",
+  13: "열세",
+  14: "열네",
+  15: "열다섯",
+  16: "열여섯",
+  17: "열일곱",
+  18: "열여덟",
+  19: "열아홉",
+  20: "스무"
 };
 
 const REWARD_GROUPS = {
@@ -122,7 +138,11 @@ const PLACEMENT_GAP = 10;
 const RANDOM_PLACEMENT_TRIES = 48;
 const REWARD_PARTICLE_COUNT = 18;
 
-const TOUCH_COUNT_CHOICES = [3, 4, 5];
+const TOUCH_COUNT_MIN = 2;
+const TOUCH_COUNT_MAX = 20;
+const PENALTY_DELAY_MIN = 0;
+const PENALTY_DELAY_MAX = 30;
+const PENALTY_DELAY_STEP = 5;
 const TOUCH_LAYOUT_CHOICES = [
   { id: "rows", label: "규칙적" },
   { id: "random", label: "무작위" }
@@ -135,8 +155,9 @@ const QUIZ_TYPE_CHOICES = [
   { id: "off", label: "없음" }
 ];
 const QUIZ_ASKABLE_TYPES = ["quantity", "numeral", "both"];
-const PENALTY_DELAY_CHOICES = [0, 5, 10];
 const QUIZ_INPUT_LOCK = 500;
+const TOUCH_CARD_MIN = 30;
+const TOUCH_CARD_MAX = 150;
 const QUIZ_CORRECT_HOLD = 1200;
 const DEMO_STEP_DELAY = 700;
 const PROGRESS_LOG_LIMIT = 4000;
@@ -179,6 +200,7 @@ const appState = {
   isRevealInProgress: false,
   countedCount: 0,
   countTarget: 0,
+  touchCardSize: null,
   hintTimerId: null,
   quizPhase: false,
   quizAnswered: false,
@@ -274,7 +296,7 @@ function loadTouchSettings() {
   try {
     const saved = JSON.parse(raw);
 
-    if (TOUCH_COUNT_CHOICES.includes(saved.maxCount)) {
+    if (isWholeNumberInRange(saved.maxCount, TOUCH_COUNT_MIN, TOUCH_COUNT_MAX)) {
       touchSettings.maxCount = saved.maxCount;
     }
 
@@ -286,12 +308,16 @@ function loadTouchSettings() {
       touchSettings.quizType = saved.quizType;
     }
 
-    if (PENALTY_DELAY_CHOICES.includes(saved.penaltyDelay)) {
+    if (isWholeNumberInRange(saved.penaltyDelay, PENALTY_DELAY_MIN, PENALTY_DELAY_MAX)) {
       touchSettings.penaltyDelay = saved.penaltyDelay;
     }
   } catch {
     // A corrupt entry is no reason to block play.
   }
+}
+
+function isWholeNumberInRange(value, min, max) {
+  return Number.isInteger(value) && value >= min && value <= max;
 }
 
 function saveTouchSettings() {
@@ -418,11 +444,18 @@ function initModeSelection() {
     touchModeButton.addEventListener("click", () => enterMode("touch"));
   }
 
-  renderSettingOptions(countOptions, TOUCH_COUNT_CHOICES.map((value) => ({
-    id: String(value),
-    label: `1~${value}`
-  })), () => String(touchSettings.maxCount), (id) => {
-    touchSettings.maxCount = Number(id);
+  // A stepper rather than one button per value: 2 through 20 is far too many
+  // buttons to sit in this row.
+  renderStepper(countOptions, {
+    min: TOUCH_COUNT_MIN,
+    max: TOUCH_COUNT_MAX,
+    step: 1,
+    ariaLabel: "세는 개수",
+    format: (value) => `1~${value}`,
+    get: () => touchSettings.maxCount,
+    set: (value) => {
+      touchSettings.maxCount = value;
+    }
   });
 
   renderSettingOptions(layoutOptions, TOUCH_LAYOUT_CHOICES, () => touchSettings.layout, (id) => {
@@ -433,11 +466,16 @@ function initModeSelection() {
     touchSettings.quizType = id;
   });
 
-  renderSettingOptions(penaltyOptions, PENALTY_DELAY_CHOICES.map((value) => ({
-    id: String(value),
-    label: value === 0 ? "없음" : `${value}초`
-  })), () => String(touchSettings.penaltyDelay), (id) => {
-    touchSettings.penaltyDelay = Number(id);
+  renderStepper(penaltyOptions, {
+    min: PENALTY_DELAY_MIN,
+    max: PENALTY_DELAY_MAX,
+    step: PENALTY_DELAY_STEP,
+    ariaLabel: "틀렸을 때 기다리는 시간",
+    format: (value) => (value === 0 ? "없음" : `${value}초`),
+    get: () => touchSettings.penaltyDelay,
+    set: (value) => {
+      touchSettings.penaltyDelay = value;
+    }
   });
 
   if (clearProgressButton) {
@@ -782,6 +820,51 @@ function renderSettingOptions(container, choices, getCurrent, apply) {
   syncSettingOptions(container, getCurrent());
 }
 
+function renderStepper(container, config) {
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = "";
+  container.classList.add("mode-stepper");
+
+  const makeButton = (label, delta) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mode-stepper-button";
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      const next = clamp(config.get() + delta, config.min, config.max);
+
+      if (next === config.get()) {
+        return;
+      }
+
+      config.set(next);
+      saveTouchSettings();
+      sync();
+    });
+    return button;
+  };
+
+  const decrease = makeButton("−", -config.step);
+  const value = document.createElement("span");
+  value.className = "mode-stepper-value";
+  value.setAttribute("role", "status");
+  value.setAttribute("aria-label", config.ariaLabel);
+  const increase = makeButton("+", config.step);
+
+  const sync = () => {
+    const current = config.get();
+    value.textContent = config.format(current);
+    decrease.disabled = current <= config.min;
+    increase.disabled = current >= config.max;
+  };
+
+  container.append(decrease, value, increase);
+  sync();
+}
+
 function syncSettingOptions(container, currentValue) {
   container.querySelectorAll(".mode-setting-option").forEach((button) => {
     const isSelected = button.dataset.value === currentValue;
@@ -981,6 +1064,10 @@ function startTouchRound() {
   renderTallyStrip(touchSettings.maxCount, 0);
   showStep("play");
 
+  // Sized before any card exists, so the very first placement already knows how
+  // big the objects will be.
+  appState.touchCardSize = computeTouchCardSize(number);
+
   // All objects at once: the child cannot judge a quantity that is still
   // arriving, and the whole set has to be there to be pointed at.
   const cards = [];
@@ -1025,17 +1112,19 @@ function handleTouchCount(card) {
   const token = nextPlaybackToken();
   statusText.textContent = NUMBER_WORDS[step];
   cancelSpeech();
-  speak(NUMBER_WORDS[step]);
+  const spokenNumber = speak(NUMBER_WORDS[step]);
 
   if (step >= appState.countTarget) {
-    finishTouchRound(token);
+    // Hand the pending word over so the summary waits for it instead of
+    // cancelling it mid-syllable.
+    finishTouchRound(token, spokenNumber);
     return;
   }
 
   scheduleTouchHint(token);
 }
 
-async function finishTouchRound(token) {
+async function finishTouchRound(token, pendingSpeech) {
   const item = appState.selectedDisplayItem;
   const cards = Array.from(objectStage.querySelectorAll(".object-card"));
 
@@ -1049,7 +1138,7 @@ async function finishTouchRound(token) {
   });
 
   playRoundCompleteChime();
-  await wait(420);
+  await Promise.allSettled([wait(420), pendingSpeech || Promise.resolve()]);
 
   if (appState.playbackToken !== token) {
     return;
@@ -1248,6 +1337,18 @@ function sizeQuizChoiceContents(choice, width, height) {
   choice.style.setProperty("--quiz-cols", String(columns));
   choice.style.setProperty("--quiz-glyph", `${Math.max(glyph, 13)}px`);
   choice.style.setProperty("--quiz-numeral", `${Math.max(Math.floor(height * 0.4), 22)}px`);
+
+  // The dot row has to wrap and shrink too: twenty dots in a single line are
+  // wider than the card.
+  const dotColumns = Math.min(count, 10);
+  const dotGap = 3;
+  const dotSize = clamp(
+    Math.floor((available.width - (dotColumns - 1) * dotGap) / dotColumns),
+    4,
+    10
+  );
+  choice.style.setProperty("--quiz-dot", `${dotSize}px`);
+  choice.style.setProperty("--quiz-dot-gap", `${dotGap}px`);
 }
 
 function layoutCardsInBand(cards, band) {
@@ -1255,9 +1356,22 @@ function layoutCardsInBand(cards, band) {
     return;
   }
 
-  const scale = 0.6;
-  const cardWidth = cards[0].offsetWidth * scale;
-  const gap = Math.max(6, Math.round(cardWidth * 0.12));
+  // The band is a fraction of the stage, so a fixed shrink stops fitting once
+  // the count grows: derive the scale from what the band can actually hold.
+  const naturalWidth = cards[0].offsetWidth;
+  const gapRatio = 0.12;
+  let bestCell = 0;
+
+  for (let columns = 1; columns <= cards.length; columns += 1) {
+    const rows = Math.ceil(cards.length / columns);
+    const byWidth = band.width / (columns + (columns - 1) * gapRatio);
+    const byHeight = band.height / (rows + (rows - 1) * gapRatio);
+    bestCell = Math.max(bestCell, Math.min(byWidth, byHeight));
+  }
+
+  const scale = Math.min(0.6, bestCell / naturalWidth);
+  const cardWidth = naturalWidth * scale;
+  const gap = Math.max(4, Math.round(cardWidth * gapRatio));
   const perRow = Math.max(
     1,
     Math.min(cards.length, Math.floor((band.width + gap) / (cardWidth + gap)))
@@ -1265,6 +1379,7 @@ function layoutCardsInBand(cards, band) {
   const rowCount = Math.ceil(cards.length / perRow);
   const blockHeight = rowCount * cardWidth + (rowCount - 1) * gap;
   const startTop = band.top + Math.max((band.height - blockHeight) / 2, 0);
+  const scaleValue = String(scale);
 
   for (let row = 0; row < rowCount; row += 1) {
     const rowCards = cards.slice(row * perRow, (row + 1) * perRow);
@@ -1272,7 +1387,7 @@ function layoutCardsInBand(cards, band) {
     const startLeft = band.left + Math.max((band.width - rowWidth) / 2, 0);
 
     rowCards.forEach((card, column) => {
-      card.style.setProperty("--reference-scale", String(scale));
+      card.style.setProperty("--reference-scale", scaleValue);
       setCardBasePosition(card, {
         left: Math.round(startLeft + column * (cardWidth + gap)),
         top: Math.round(startTop + row * (cardWidth + gap))
@@ -1392,8 +1507,8 @@ async function demonstrateCorrectCount(token) {
     playCountTone(step);
     statusText.textContent = NUMBER_WORDS[step];
     cancelSpeech();
-    speak(NUMBER_WORDS[step]);
-    await wait(DEMO_STEP_DELAY);
+    // Whichever is longer: a fixed pace would clip the longer number words.
+    await Promise.allSettled([speak(NUMBER_WORDS[step]), wait(DEMO_STEP_DELAY)]);
   }
 
   if (appState.playbackToken !== token) {
@@ -1463,6 +1578,13 @@ function renderTallyStrip(slotCount, filledCount) {
   }
 
   tallyStrip.innerHTML = "";
+
+  // Twenty dots do not fit a phone at the three-dot size, so the dots shrink as
+  // the range grows and the strip is allowed to wrap. The slot count is fixed
+  // for the whole round, so this never changes height mid-round.
+  const dotSize = clamp(Math.floor(280 / Math.max(slotCount, 1)), 10, 30);
+  tallyStrip.style.setProperty("--tally-dot-size", `${dotSize}px`);
+  tallyStrip.style.setProperty("--tally-gap", `${clamp(Math.round(dotSize * 0.4), 4, 12)}px`);
 
   for (let index = 1; index <= slotCount; index += 1) {
     const dot = document.createElement("span");
@@ -1657,6 +1779,15 @@ function addObjectCard(item, index) {
   card.dataset.dragY = "0";
   card.style.animationDelay = `${Math.min(index * 40, 280)}ms`;
   card.innerHTML = `<div class="object-symbol" aria-hidden="true">${displayItem.symbol}</div>`;
+
+  // Touch mode sizes the card to the count. Setting the glyph inline too keeps
+  // it in proportion even without container-query support.
+  if (appState.mode === "touch" && appState.touchCardSize) {
+    card.style.width = `${appState.touchCardSize}px`;
+    const symbol = card.querySelector(".object-symbol");
+    symbol.style.fontSize = `${Math.floor(appState.touchCardSize * 0.56)}px`;
+  }
+
   card.addEventListener("click", () => {
     if (!appState.selectedNumber || appState.suppressObjectTap) {
       return;
@@ -1717,6 +1848,38 @@ function getStageInnerSize() {
   };
 }
 
+// With up to twenty objects the card can no longer be a fixed CSS size: it has
+// to be whatever still fits the stage. Tries every column count and keeps the
+// arrangement that allows the largest square.
+function computeTouchCardSize(count) {
+  const inner = getStageInnerSize();
+
+  if (inner.width <= 0 || inner.height <= 0) {
+    return null;
+  }
+
+  const gap = touchCardGap(count);
+  let best = 0;
+
+  for (let columns = 1; columns <= count; columns += 1) {
+    const rows = Math.ceil(count / columns);
+    const byWidth = (inner.width - (columns - 1) * gap) / columns;
+    const byHeight = (inner.height - (rows - 1) * gap) / rows;
+    best = Math.max(best, Math.min(byWidth, byHeight));
+  }
+
+  // A scattered set needs slack that a grid does not: at the size that exactly
+  // fills the stage there is no arrangement left for randomness to find, and the
+  // objects end up overlapping — which is the one thing counting cannot have.
+  const slack = touchSettings.layout === "random" ? 0.78 : 1;
+
+  return clamp(Math.floor(best * slack), TOUCH_CARD_MIN, TOUCH_CARD_MAX);
+}
+
+function touchCardGap(count) {
+  return count > 8 ? 6 : PLACEMENT_GAP;
+}
+
 // Deterministic layout: the same count always lands in the same places, so a
 // small quantity stays perceivable instead of having to be tracked one by one.
 function layoutObjectCardsInRows(cards) {
@@ -1725,27 +1888,28 @@ function layoutObjectCardsInRows(cards) {
   }
 
   const inner = getStageInnerSize();
+  const gap = touchCardGap(cards.length);
   const cardWidth = cards[0].offsetWidth;
   const cardHeight = cards[0].offsetHeight;
   const perRow = Math.max(
     1,
-    Math.min(cards.length, Math.floor((inner.width + PLACEMENT_GAP) / (cardWidth + PLACEMENT_GAP)))
+    Math.min(cards.length, Math.floor((inner.width + gap) / (cardWidth + gap)))
   );
   const rowCount = Math.ceil(cards.length / perRow);
-  const blockHeight = rowCount * cardHeight + (rowCount - 1) * PLACEMENT_GAP;
+  const blockHeight = rowCount * cardHeight + (rowCount - 1) * gap;
   const maxLeft = Math.max(inner.width - cardWidth, 0);
   const maxTop = Math.max(inner.height - cardHeight, 0);
   const startTop = Math.max((inner.height - blockHeight) / 2, 0);
 
   for (let row = 0; row < rowCount; row += 1) {
     const rowCards = cards.slice(row * perRow, (row + 1) * perRow);
-    const rowWidth = rowCards.length * cardWidth + (rowCards.length - 1) * PLACEMENT_GAP;
+    const rowWidth = rowCards.length * cardWidth + (rowCards.length - 1) * gap;
     const startLeft = Math.max((inner.width - rowWidth) / 2, 0);
 
     rowCards.forEach((card, column) => {
       setCardBasePosition(card, {
-        left: Math.round(clamp(startLeft + column * (cardWidth + PLACEMENT_GAP), 0, maxLeft)),
-        top: Math.round(clamp(startTop + row * (cardHeight + PLACEMENT_GAP), 0, maxTop))
+        left: Math.round(clamp(startLeft + column * (cardWidth + gap), 0, maxLeft)),
+        top: Math.round(clamp(startTop + row * (cardHeight + gap), 0, maxTop))
       });
     });
   }
@@ -1759,10 +1923,14 @@ function placeObjectCardRandomly(card) {
     .filter((existingCard) => existingCard !== card)
     .map(getCardPlacementBox);
 
+  // A crowded stage cannot afford the roomy gap, or no placement ever clears it.
+  const gap = touchCardGap(existingBoxes.length + 1);
   let bestCandidate = createRandomPlacement(maxLeft, maxTop);
   let bestScore = -1;
 
-  for (let attempt = 0; attempt < RANDOM_PLACEMENT_TRIES; attempt += 1) {
+  const tries = Math.max(RANDOM_PLACEMENT_TRIES, (existingBoxes.length + 1) * 12);
+
+  for (let attempt = 0; attempt < tries; attempt += 1) {
     const candidate = createRandomPlacement(maxLeft, maxTop);
     const candidateBox = {
       left: candidate.left,
@@ -1771,7 +1939,7 @@ function placeObjectCardRandomly(card) {
       height: card.offsetHeight
     };
 
-    if (!existingBoxes.some((box) => doBoxesOverlap(candidateBox, box, PLACEMENT_GAP))) {
+    if (!existingBoxes.some((box) => doBoxesOverlap(candidateBox, box, gap))) {
       setCardBasePosition(card, candidate);
       return;
     }
@@ -2062,7 +2230,10 @@ function speak(text) {
     utterance.onend = finish;
     utterance.onerror = finish;
 
-    window.setTimeout(finish, 1600);
+    // Only a safety net for engines that never fire onend. A flat cap cut longer
+    // words ("다섯", "열다섯", "아이스크림 스무 개") off partway, because callers
+    // treat this promise as "the word is done" and cancel to speak the next one.
+    window.setTimeout(finish, Math.min(1200 + text.length * 300, 10000));
 
     try {
       window.speechSynthesis.speak(utterance);

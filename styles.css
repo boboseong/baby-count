@@ -235,6 +235,43 @@ button {
   box-shadow: none;
 }
 
+/* A stepper where one button per value would be too many (2–20, 0–30s). */
+.mode-stepper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mode-stepper-button {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(217, 108, 47, 0.14);
+  color: var(--accent-strong);
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.mode-stepper-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.mode-stepper-value {
+  min-width: 4.2em;
+  color: var(--text-main);
+  font-size: 0.9rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
 /* The record is read by the grown-up, so it stays restrained on purpose: thin
    bars, hairline axes, no toy styling. */
 .progress-block {
@@ -725,6 +762,18 @@ button {
   font-size: var(--quiz-numeral, 2.4rem);
 }
 
+.quiz-choice .answer-dots {
+  flex-wrap: wrap;
+  max-width: 100%;
+  gap: var(--quiz-dot-gap, 4px);
+}
+
+.quiz-choice .answer-dot {
+  width: var(--quiz-dot, 10px);
+  height: var(--quiz-dot, 10px);
+  flex: none;
+}
+
 .quiz-choice--correct {
   background: linear-gradient(180deg, #e6fbf3, #b6f0dd);
   box-shadow:
@@ -775,9 +824,11 @@ button {
   margin-top: 10px;
   min-height: 44px;
   display: flex;
+  flex-wrap: wrap;
+  align-content: center;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: var(--tally-gap, 12px);
 }
 
 .tally-strip[hidden] {
@@ -785,8 +836,9 @@ button {
 }
 
 .tally-dot {
-  width: clamp(20px, 3.4vh, 30px);
-  height: clamp(20px, 3.4vh, 30px);
+  width: var(--tally-dot-size, 24px);
+  height: var(--tally-dot-size, 24px);
+  flex: none;
   border-radius: 50%;
   background: rgba(217, 108, 47, 0.14);
   box-shadow: inset 0 0 0 2px rgba(217, 108, 47, 0.24);
