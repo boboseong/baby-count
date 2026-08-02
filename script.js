@@ -155,6 +155,11 @@ const QUIZ_TYPE_CHOICES = [
   { id: "off", label: "없음" }
 ];
 const QUIZ_ASKABLE_TYPES = ["quantity", "numeral", "both"];
+const PROGRESS_FILTER_ALL = "all";
+const PROGRESS_FILTER_CHOICES = [
+  { id: PROGRESS_FILTER_ALL, label: "전체" },
+  ...QUIZ_ASKABLE_TYPES.map((type) => ({ id: type, label: quizTypeLabel(type) }))
+];
 const QUIZ_INPUT_LOCK = 500;
 const TOUCH_CARD_MIN = 30;
 const TOUCH_CARD_MAX = 150;
@@ -176,15 +181,23 @@ const touchSettings = {
 };
 
 // Counters accumulate for the life of the install and are never trimmed, so
-// per-number accuracy stays exact. Only the bit log used for the trend line is
-// bounded, and it is the one thing that can afford to forget.
+// per-number accuracy stays exact. Only the bit logs used for the trend line are
+// bounded, and they are the one thing that can afford to forget.
+// typeNumber and typeLog mirror byNumber and log inside a single quiz type, which
+// is what lets the record be read one type at a time.
 // Declared here, above the init block that calls loadProgress().
 const progress = {
   byNumber: {},
   byType: {},
+  typeNumber: {},
+  typeLog: {},
   total: { ok: 0, count: 0 },
   log: ""
 };
+
+// A view preference, not a setting: it changes what the grown-up is looking at,
+// never what the child is asked, so it is not persisted.
+let progressFilter = PROGRESS_FILTER_ALL;
 
 const appState = {
   mode: "classic",
@@ -271,6 +284,7 @@ const penaltyOptions = document.getElementById("penalty-options");
 const progressSummary = document.getElementById("progress-summary");
 const numberAccuracy = document.getElementById("number-accuracy");
 const typeAccuracy = document.getElementById("type-accuracy");
+const progressTypeFilter = document.getElementById("progress-type-filter");
 const trendChart = document.getElementById("trend-chart");
 const clearProgressButton = document.getElementById("clear-progress");
 
@@ -349,10 +363,15 @@ function loadProgress() {
     const saved = JSON.parse(raw);
     progress.byNumber = sanitizeBuckets(saved.byNumber);
     progress.byType = sanitizeBuckets(saved.byType);
+    // Records written before the per-type breakdown existed have no typeNumber or
+    // typeLog. They keep counting toward the totals they were written for; only the
+    // per-type drill-down starts from empty.
+    progress.typeNumber = sanitizeBucketMaps(saved.typeNumber);
+    progress.typeLog = sanitizeLogs(saved.typeLog);
 
     const total = sanitizeBucket(saved.total);
     progress.total = total || createProgressBucket();
-    progress.log = typeof saved.log === "string" ? saved.log.replace(/[^01]/g, "") : "";
+    progress.log = sanitizeLog(saved.log);
   } catch {
     clearProgressState();
   }
@@ -374,6 +393,46 @@ function sanitizeBuckets(source) {
   });
 
   return result;
+}
+
+function sanitizeBucketMaps(source) {
+  const result = {};
+
+  if (!source || typeof source !== "object") {
+    return result;
+  }
+
+  Object.keys(source).forEach((key) => {
+    const buckets = sanitizeBuckets(source[key]);
+
+    if (Object.keys(buckets).length > 0) {
+      result[key] = buckets;
+    }
+  });
+
+  return result;
+}
+
+function sanitizeLogs(source) {
+  const result = {};
+
+  if (!source || typeof source !== "object") {
+    return result;
+  }
+
+  Object.keys(source).forEach((key) => {
+    const log = sanitizeLog(source[key]);
+
+    if (log) {
+      result[key] = log;
+    }
+  });
+
+  return result;
+}
+
+function sanitizeLog(value) {
+  return typeof value === "string" ? value.replace(/[^01]/g, "") : "";
 }
 
 function sanitizeBucket(bucket) {
@@ -402,17 +461,27 @@ function saveProgress() {
 function clearProgressState() {
   progress.byNumber = {};
   progress.byType = {};
+  progress.typeNumber = {};
+  progress.typeLog = {};
   progress.total = createProgressBucket();
   progress.log = "";
 }
 
 function recordQuizResult(quizType, answer, isCorrect) {
   const numberKey = String(answer);
+  const typeNumbers = progress.typeNumber[quizType] || {};
+  progress.typeNumber[quizType] = typeNumbers;
 
   progress.byNumber[numberKey] = progress.byNumber[numberKey] || createProgressBucket();
   progress.byType[quizType] = progress.byType[quizType] || createProgressBucket();
+  typeNumbers[numberKey] = typeNumbers[numberKey] || createProgressBucket();
 
-  [progress.byNumber[numberKey], progress.byType[quizType], progress.total].forEach((bucket) => {
+  [
+    progress.byNumber[numberKey],
+    progress.byType[quizType],
+    typeNumbers[numberKey],
+    progress.total
+  ].forEach((bucket) => {
     bucket.count += 1;
 
     if (isCorrect) {
@@ -420,18 +489,28 @@ function recordQuizResult(quizType, answer, isCorrect) {
     }
   });
 
-  progress.log += isCorrect ? "1" : "0";
-
-  if (progress.log.length > PROGRESS_LOG_LIMIT) {
-    progress.log = progress.log.slice(progress.log.length - PROGRESS_LOG_LIMIT);
-  }
+  progress.log = appendProgressLog(progress.log, isCorrect);
+  progress.typeLog[quizType] = appendProgressLog(progress.typeLog[quizType] || "", isCorrect);
 
   saveProgress();
+}
+
+function appendProgressLog(log, isCorrect) {
+  const next = log + (isCorrect ? "1" : "0");
+  return next.length > PROGRESS_LOG_LIMIT
+    ? next.slice(next.length - PROGRESS_LOG_LIMIT)
+    : next;
 }
 
 function clearProgress() {
   clearProgressState();
   saveProgress();
+  progressFilter = PROGRESS_FILTER_ALL;
+
+  if (progressTypeFilter) {
+    syncSettingOptions(progressTypeFilter, progressFilter);
+  }
+
   renderProgressSummary();
 }
 
@@ -478,11 +557,29 @@ function initModeSelection() {
     }
   });
 
+  // A filter, not a setting, so it sits with the record it scopes and is not
+  // written to storage.
+  renderSettingOptions(
+    progressTypeFilter,
+    PROGRESS_FILTER_CHOICES,
+    () => progressFilter,
+    (id) => {
+      progressFilter = id;
+      renderProgressSummary();
+    },
+    false
+  );
+
   if (clearProgressButton) {
     clearProgressButton.addEventListener("click", clearProgress);
   }
 
   renderProgressSummary();
+}
+
+function quizTypeLabel(type) {
+  const choice = QUIZ_TYPE_CHOICES.find((item) => item.id === type);
+  return choice ? choice.label : type;
 }
 
 function formatAccuracy(bucket) {
@@ -493,19 +590,83 @@ function formatAccuracy(bucket) {
   return `${bucket.ok}/${bucket.count} (${Math.round((bucket.ok / bucket.count) * 100)}%)`;
 }
 
-function renderProgressSummary() {
-  if (progressSummary) {
-    progressSummary.textContent = progress.total.count === 0
-      ? "아직 기록이 없어요."
-      : `전체 ${formatAccuracy(progress.total)} · 우연 수준 50%`;
+// Everything below the filter reads from one view, so the summary, the bars and
+// the trend line can never end up describing different slices of the record.
+function getProgressView() {
+  if (progressFilter === PROGRESS_FILTER_ALL) {
+    return {
+      isAll: true,
+      label: "전체",
+      total: progress.total,
+      byNumber: progress.byNumber,
+      log: progress.log
+    };
   }
 
-  renderNumberAccuracyBars();
-  renderTypeAccuracy();
-  renderMovingAverageChart();
+  return {
+    isAll: false,
+    label: quizTypeLabel(progressFilter),
+    total: progress.byType[progressFilter] || createProgressBucket(),
+    byNumber: progress.typeNumber[progressFilter] || {},
+    log: progress.typeLog[progressFilter] || ""
+  };
 }
 
-function renderNumberAccuracyBars() {
+function renderProgressSummary() {
+  const view = getProgressView();
+
+  if (progressSummary) {
+    if (view.total.count === 0) {
+      progressSummary.textContent = view.isAll
+        ? "아직 기록이 없어요."
+        : `${view.label} 기록이 아직 없어요.`;
+    } else {
+      progressSummary.textContent = `${view.label} ${formatAccuracy(view.total)} · 우연 수준 50%`;
+    }
+  }
+
+  renderTypeAccuracy();
+  renderNumberAccuracyBars(view.byNumber);
+  renderMovingAverageChart(view.log, view.isAll ? null : view.label);
+}
+
+// One measure across categories, so every bar carries the same hue: a different
+// colour per row would read as a different kind of thing.
+function createAccuracyRow(labelText, bucket, isWideLabel) {
+  const ratio = bucket.count === 0 ? 0 : bucket.ok / bucket.count;
+
+  const row = document.createElement("div");
+  row.className = "accuracy-row";
+
+  const label = document.createElement("span");
+  label.className = isWideLabel ? "accuracy-label accuracy-label--wide" : "accuracy-label";
+  label.textContent = labelText;
+  row.appendChild(label);
+
+  const track = document.createElement("span");
+  track.className = "accuracy-track";
+  const bar = document.createElement("span");
+  bar.className = "accuracy-bar";
+  bar.style.width = `${(ratio * 100).toFixed(1)}%`;
+  track.appendChild(bar);
+  row.appendChild(track);
+
+  const value = document.createElement("span");
+  value.className = "accuracy-value";
+  value.textContent = formatAccuracy(bucket);
+  row.appendChild(value);
+
+  if (bucket.count < 5) {
+    const note = document.createElement("span");
+    note.className = "accuracy-note";
+    note.textContent = "표본 적음";
+    row.appendChild(note);
+  }
+
+  return row;
+}
+
+function renderNumberAccuracyBars(byNumber) {
   if (!numberAccuracy) {
     return;
   }
@@ -514,8 +675,8 @@ function renderNumberAccuracyBars() {
 
   // Only numbers that actually came up, so changing the count range never leaves
   // empty rows behind.
-  const keys = Object.keys(progress.byNumber)
-    .filter((key) => progress.byNumber[key].count > 0)
+  const keys = Object.keys(byNumber)
+    .filter((key) => byNumber[key].count > 0)
     .sort((a, b) => Number(a) - Number(b));
 
   if (keys.length === 0) {
@@ -527,43 +688,12 @@ function renderNumberAccuracyBars() {
   }
 
   keys.forEach((key) => {
-    const bucket = progress.byNumber[key];
-    const ratio = bucket.ok / bucket.count;
-
-    const row = document.createElement("div");
-    row.className = "accuracy-row";
-
-    const label = document.createElement("span");
-    label.className = "accuracy-label";
-    label.textContent = key;
-    row.appendChild(label);
-
-    const track = document.createElement("span");
-    track.className = "accuracy-track";
-    const bar = document.createElement("span");
-    // One measure across categories, so every bar carries the same hue: a
-    // different colour per number would read as a different kind of thing.
-    bar.className = "accuracy-bar";
-    bar.style.width = `${(ratio * 100).toFixed(1)}%`;
-    track.appendChild(bar);
-    row.appendChild(track);
-
-    const value = document.createElement("span");
-    value.className = "accuracy-value";
-    value.textContent = formatAccuracy(bucket);
-    row.appendChild(value);
-
-    if (bucket.count < 5) {
-      const note = document.createElement("span");
-      note.className = "accuracy-note";
-      note.textContent = "표본 적음";
-      row.appendChild(note);
-    }
-
-    numberAccuracy.appendChild(row);
+    numberAccuracy.appendChild(createAccuracyRow(key, byNumber[key], false));
   });
 }
 
+// The type comparison stays whole whatever the filter is set to: it is what the
+// filter is chosen from, so hiding rows would hide the reason to switch.
 function renderTypeAccuracy() {
   if (!typeAccuracy) {
     return;
@@ -571,17 +701,26 @@ function renderTypeAccuracy() {
 
   typeAccuracy.innerHTML = "";
 
-  QUIZ_ASKABLE_TYPES.forEach((type) => {
+  const askedTypes = QUIZ_ASKABLE_TYPES.filter((type) => {
     const bucket = progress.byType[type];
+    return Boolean(bucket) && bucket.count > 0;
+  });
 
-    if (!bucket || bucket.count === 0) {
-      return;
+  if (askedTypes.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "accuracy-empty";
+    empty.textContent = "유형별 기록은 문제를 풀면 쌓여요.";
+    typeAccuracy.appendChild(empty);
+    return;
+  }
+
+  askedTypes.forEach((type) => {
+    const row = createAccuracyRow(quizTypeLabel(type), progress.byType[type], true);
+
+    if (type === progressFilter) {
+      row.classList.add("accuracy-row--active");
     }
 
-    const label = QUIZ_TYPE_CHOICES.find((choice) => choice.id === type);
-    const row = document.createElement("p");
-    row.className = "progress-type-row";
-    row.textContent = `${label ? label.label : type} ${formatAccuracy(bucket)}`;
     typeAccuracy.appendChild(row);
   });
 }
@@ -647,14 +786,14 @@ function svgNode(name, attributes) {
   return node;
 }
 
-function renderMovingAverageChart() {
+function renderMovingAverageChart(log, scopeLabel) {
   if (!trendChart) {
     return;
   }
 
   trendChart.innerHTML = "";
 
-  const allPoints = computeMovingAverage(progress.log, MOVING_AVERAGE_WINDOW);
+  const allPoints = computeMovingAverage(log, MOVING_AVERAGE_WINDOW);
 
   if (allPoints.length === 0) {
     const note = document.createElement("p");
@@ -666,10 +805,12 @@ function renderMovingAverageChart() {
 
   const points = downsampleSeries(allPoints, TREND_MAX_COLUMNS);
   const latest = allPoints[allPoints.length - 1];
+  // One series, so the heading names it instead of a legend box.
+  const scopePrefix = scopeLabel ? `${scopeLabel} · ` : "";
 
   const heading = document.createElement("p");
   heading.className = "trend-heading";
-  heading.textContent = `최근 ${MOVING_AVERAGE_WINDOW}문제 이동평균 ${Math.round(latest.value * 100)}%`;
+  heading.textContent = `${scopePrefix}최근 ${MOVING_AVERAGE_WINDOW}문제 이동평균 ${Math.round(latest.value * 100)}%`;
   trendChart.appendChild(heading);
 
   const width = 300;
@@ -682,7 +823,7 @@ function renderMovingAverageChart() {
     viewBox: `0 0 ${width} ${height}`,
     class: "trend-svg",
     role: "img",
-    "aria-label": `10문제 이동평균 추이, 현재 ${Math.round(latest.value * 100)}퍼센트`
+    "aria-label": `${scopePrefix}${MOVING_AVERAGE_WINDOW}문제 이동평균 추이, 현재 ${Math.round(latest.value * 100)}퍼센트`
   });
 
   const xFor = (index) => points.length === 1
@@ -796,7 +937,7 @@ function attachTrendTooltip(svg, points, geometry) {
   svg.addEventListener("pointerleave", hide);
 }
 
-function renderSettingOptions(container, choices, getCurrent, apply) {
+function renderSettingOptions(container, choices, getCurrent, apply, persist = true) {
   if (!container) {
     return;
   }
@@ -811,7 +952,11 @@ function renderSettingOptions(container, choices, getCurrent, apply) {
     button.textContent = choice.label;
     button.addEventListener("click", () => {
       apply(choice.id);
-      saveTouchSettings();
+
+      if (persist) {
+        saveTouchSettings();
+      }
+
       syncSettingOptions(container, getCurrent());
     });
     container.appendChild(button);
@@ -964,9 +1109,13 @@ function pickCountTarget(maxCount) {
     return 1;
   }
 
-  let number = appState.lastNumber;
+  // The no-repeat rule keeps a wide range from stalling on one number, but over a
+  // range of two it turns the round into a perfect alternation the child can
+  // follow without counting anything. There, repeats are the lesser evil.
+  const avoidRepeat = maxCount > 2;
+  let number = Math.floor(Math.random() * maxCount) + 1;
 
-  while (number === appState.lastNumber) {
+  while (avoidRepeat && number === appState.lastNumber) {
     number = Math.floor(Math.random() * maxCount) + 1;
   }
 

@@ -316,6 +316,15 @@ button {
   font-weight: 700;
 }
 
+/* The filter sits in one row above everything it scopes. */
+.progress-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin-top: 2px;
+}
+
 .number-accuracy {
   display: flex;
   flex-direction: column;
@@ -336,6 +345,17 @@ button {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/* Type names need the room a single digit does not. */
+.accuracy-label--wide {
+  width: 4.6em;
+  text-align: left;
+}
+
+.accuracy-row--active .accuracy-label,
+.accuracy-row--active .accuracy-value {
+  color: var(--accent-strong);
 }
 
 .accuracy-track {
@@ -458,16 +478,8 @@ button {
 
 .type-accuracy {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px 14px;
-}
-
-.progress-type-row {
-  margin: 0;
-  color: var(--text-soft);
-  font-size: 0.8rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .item-groups {
