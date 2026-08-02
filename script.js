@@ -160,10 +160,16 @@ const PROGRESS_FILTER_CHOICES = [
   { id: PROGRESS_FILTER_ALL, label: "전체" },
   ...QUIZ_ASKABLE_TYPES.map((type) => ({ id: type, label: quizTypeLabel(type) }))
 ];
+const REPLAY_ON_CORRECT_CHOICES = [
+  { id: "on", label: "켬" },
+  { id: "off", label: "끔" }
+];
 const QUIZ_INPUT_LOCK = 500;
 const TOUCH_CARD_MIN = 30;
 const TOUCH_CARD_MAX = 150;
-const QUIZ_CORRECT_HOLD = 1200;
+// Long enough for the reward overlay to finish its animation: cutting it off
+// mid-burst reads as the app losing interest first.
+const REWARD_OVERLAY_HOLD = 1500;
 const DEMO_STEP_DELAY = 700;
 const PROGRESS_LOG_LIMIT = 4000;
 const MOVING_AVERAGE_WINDOW = 10;
@@ -177,6 +183,7 @@ const touchSettings = {
   maxCount: 3,
   layout: "rows",
   quizType: "quantity",
+  replayOnCorrect: true,
   penaltyDelay: 10
 };
 
@@ -280,6 +287,7 @@ const touchModeButton = document.getElementById("mode-touch");
 const countOptions = document.getElementById("count-options");
 const layoutOptions = document.getElementById("layout-options");
 const quizTypeOptions = document.getElementById("quiz-type-options");
+const replayOptions = document.getElementById("replay-options");
 const penaltyOptions = document.getElementById("penalty-options");
 const progressSummary = document.getElementById("progress-summary");
 const numberAccuracy = document.getElementById("number-accuracy");
@@ -320,6 +328,10 @@ function loadTouchSettings() {
 
     if (QUIZ_TYPE_CHOICES.some((choice) => choice.id === saved.quizType)) {
       touchSettings.quizType = saved.quizType;
+    }
+
+    if (typeof saved.replayOnCorrect === "boolean") {
+      touchSettings.replayOnCorrect = saved.replayOnCorrect;
     }
 
     if (isWholeNumberInRange(saved.penaltyDelay, PENALTY_DELAY_MIN, PENALTY_DELAY_MAX)) {
@@ -544,6 +556,15 @@ function initModeSelection() {
   renderSettingOptions(quizTypeOptions, QUIZ_TYPE_CHOICES, () => touchSettings.quizType, (id) => {
     touchSettings.quizType = id;
   });
+
+  renderSettingOptions(
+    replayOptions,
+    REPLAY_ON_CORRECT_CHOICES,
+    () => (touchSettings.replayOnCorrect ? "on" : "off"),
+    (id) => {
+      touchSettings.replayOnCorrect = id === "on";
+    }
+  );
 
   renderStepper(penaltyOptions, {
     min: PENALTY_DELAY_MIN,
@@ -1578,26 +1599,68 @@ async function handleQuizChoice(choice) {
 
 async function playQuizCorrect(choice, token) {
   const referenceCards = Array.from(objectStage.querySelectorAll(".object-card"));
+  const reward = pickQuizRewardVariant();
+  const overlay = createInstantReward(reward);
 
   choice.classList.add("quiz-choice--correct");
-  objectStage.classList.add("object-stage--celebrate");
-  referenceCards.forEach((card, index) => {
-    card.style.setProperty("--reward-delay", `${Math.min(index * 45, 220)}ms`);
-    card.classList.add("object-card--celebrate");
-  });
+  startCardCelebration(referenceCards);
+  playStep.appendChild(overlay);
 
-  playRoundCompleteChime();
-  statusText.textContent = "맞았어요!";
+  statusText.textContent = reward.phrase;
   cancelSpeech();
-  speak("맞았어요!");
 
-  await wait(QUIZ_CORRECT_HOLD);
+  const soundPromise = playCheerSound();
+  const speechPromise = speak(reward.speech);
+
+  try {
+    await wait(REWARD_OVERLAY_HOLD);
+    await Promise.allSettled([soundPromise, speechPromise]);
+  } finally {
+    // The overlay lives on the step, not the stage, so nothing else sweeps it up
+    // if the round is abandoned part way through the celebration.
+    overlay.remove();
+  }
 
   if (appState.playbackToken !== token) {
     return;
   }
 
+  // The same correction a wrong answer gets, without the wait it is paid with:
+  // here the count confirms an answer the child already found.
+  if (touchSettings.replayOnCorrect) {
+    endCardCelebration(referenceCards);
+    await demonstrateCorrectCount(token);
+
+    if (appState.playbackToken !== token) {
+      return;
+    }
+  }
+
   resetToHome();
+}
+
+// One answer, one shot, so there is no attempt count to grade here. The praise is
+// drawn from the whole single-try pool instead, so the same words do not come
+// back every round.
+function pickQuizRewardVariant() {
+  const pool = [...REWARD_GROUPS.firstTry, ...REWARD_GROUPS.steadyTry];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function startCardCelebration(cards) {
+  objectStage.classList.add("object-stage--celebrate");
+  cards.forEach((card, index) => {
+    card.style.setProperty("--reward-delay", `${Math.min(index * 45, 220)}ms`);
+    card.classList.add("object-card--celebrate");
+  });
+}
+
+function endCardCelebration(cards) {
+  objectStage.classList.remove("object-stage--celebrate");
+  cards.forEach((card) => {
+    card.classList.remove("object-card--celebrate");
+    card.style.removeProperty("--reward-delay");
+  });
 }
 
 async function playQuizPenalty(choice, token) {
@@ -1842,29 +1905,24 @@ async function playCorrectReward(button, token, attemptCount) {
 
   statusText.textContent = reward.phrase;
   button.classList.add("correct-answer");
-  objectStage.classList.add("object-stage--celebrate");
-  cards.forEach((card, index) => {
-    card.style.setProperty("--reward-delay", `${Math.min(index * 45, 220)}ms`);
-    card.classList.add("object-card--celebrate");
-  });
+  startCardCelebration(cards);
   playStep.appendChild(overlay);
 
   const soundPromise = playCheerSound();
   const speechPromise = speak(reward.speech);
 
-  await wait(1500);
-  await Promise.allSettled([soundPromise, speechPromise]);
+  try {
+    await wait(REWARD_OVERLAY_HOLD);
+    await Promise.allSettled([soundPromise, speechPromise]);
+  } finally {
+    overlay.remove();
+  }
 
   if (appState.playbackToken !== token) {
     return;
   }
 
-  overlay.remove();
-  objectStage.classList.remove("object-stage--celebrate");
-  cards.forEach((card) => {
-    card.classList.remove("object-card--celebrate");
-    card.style.removeProperty("--reward-delay");
-  });
+  endCardCelebration(cards);
   answerGrid.classList.remove("answer-grid--locked");
 }
 
@@ -2187,6 +2245,7 @@ function resetToHome() {
   cancelSpeech();
   objectStage.innerHTML = "";
   objectStage.classList.remove("object-stage--celebrate");
+  playStep.querySelectorAll(".instant-reward").forEach((node) => node.remove());
   answerGrid.innerHTML = "";
   answerGrid.classList.remove("answer-grid--pending", "answer-grid--locked");
 
