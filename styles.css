@@ -772,18 +772,7 @@ button {
 
 .quiz-choice .answer-number {
   font-size: var(--quiz-numeral, 2.4rem);
-}
-
-.quiz-choice .answer-dots {
-  flex-wrap: wrap;
-  max-width: 100%;
-  gap: var(--quiz-dot-gap, 4px);
-}
-
-.quiz-choice .answer-dot {
-  width: var(--quiz-dot, 10px);
-  height: var(--quiz-dot, 10px);
-  flex: none;
+  line-height: 1;
 }
 
 /* The pop lands first, then a slow glow holds the mark for the rest of the
@@ -817,10 +806,6 @@ button {
   color: #9c8b7a;
   box-shadow: inset 0 0 0 2px rgba(122, 73, 34, 0.16);
   animation: quiz-choice-shake 320ms ease-in-out both;
-}
-
-.quiz-choice--wrong .answer-dot {
-  background: #9c8b7a;
 }
 
 .quiz-choice--reveal {

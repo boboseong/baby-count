@@ -165,6 +165,7 @@ const REPLAY_ON_CORRECT_CHOICES = [
   { id: "off", label: "끔" }
 ];
 const QUIZ_INPUT_LOCK = 500;
+const QUIZ_CHOICE_GAP = 6;
 const TOUCH_CARD_MIN = 30;
 const TOUCH_CARD_MAX = 150;
 // Long enough for the reward overlay to finish its animation: cutting it off
@@ -1418,7 +1419,20 @@ function buildQuizChoice(item, value, isCorrect) {
   choice.dataset.value = String(value);
   choice.dataset.correct = isCorrect ? "true" : "false";
 
-  if (appState.quizType === "quantity") {
+  // The quantity is always shown as the objects themselves. A dot is one more
+  // thing to map onto the set on the stage, and the child is here to count
+  // cookies, not to learn that a dot stands for one.
+  const showsNumeral = appState.quizType !== "quantity";
+  const showsObjects = appState.quizType !== "numeral";
+
+  if (showsNumeral) {
+    const numeral = document.createElement("span");
+    numeral.className = "answer-number";
+    numeral.textContent = String(value);
+    choice.appendChild(numeral);
+  }
+
+  if (showsObjects) {
     const glyphs = document.createElement("span");
     glyphs.className = "quiz-choice-glyphs";
     glyphs.setAttribute("aria-hidden", "true");
@@ -1431,32 +1445,21 @@ function buildQuizChoice(item, value, isCorrect) {
     }
 
     choice.appendChild(glyphs);
-    choice.setAttribute("aria-label", `${item.name} ${value}개`);
-  } else {
-    const numeral = document.createElement("span");
-    numeral.className = "answer-number";
-    numeral.textContent = String(value);
-    choice.appendChild(numeral);
-
-    if (appState.quizType === "both") {
-      const dots = document.createElement("span");
-      dots.className = "answer-dots";
-      dots.setAttribute("aria-hidden", "true");
-
-      for (let index = 0; index < value; index += 1) {
-        const dot = document.createElement("span");
-        dot.className = "answer-dot";
-        dots.appendChild(dot);
-      }
-
-      choice.appendChild(dots);
-    }
-
-    choice.setAttribute("aria-label", String(value));
   }
 
+  choice.setAttribute("aria-label", formatQuizChoiceLabel(item, value, showsNumeral, showsObjects));
   choice.addEventListener("click", () => handleQuizChoice(choice));
   return choice;
+}
+
+function formatQuizChoiceLabel(item, value, showsNumeral, showsObjects) {
+  const objects = `${item.name} ${value}개`;
+
+  if (!showsObjects) {
+    return String(value);
+  }
+
+  return showsNumeral ? `${value}, ${objects}` : objects;
 }
 
 // Reference and choices share the stage, so nothing outside it changes height and
@@ -1496,7 +1499,20 @@ function sizeQuizChoiceContents(choice, width, height) {
   const count = Number(choice.dataset.value) || 1;
   const columns = Math.min(count, Math.ceil(Math.sqrt(count)));
   const rows = Math.ceil(count / columns);
-  const available = { width: width - 20, height: height - 20 };
+  const hasNumeral = Boolean(choice.querySelector(".answer-number"));
+  const hasGlyphs = Boolean(choice.querySelector(".quiz-choice-glyphs"));
+  // Sharing the card with the objects, the numeral gives up some of its height:
+  // at the size it takes on its own there is nothing left to put under it.
+  const numeral = hasNumeral
+    ? Math.max(Math.floor(height * (hasGlyphs ? 0.3 : 0.4)), 20)
+    : 0;
+  const available = {
+    width: width - 20,
+    // QUIZ_CHOICE_GAP matches the flex gap in the stylesheet: the numeral and the
+    // space under it come out of the glyph budget, or the objects overflow the
+    // bottom of the card.
+    height: height - 20 - (hasNumeral ? numeral + QUIZ_CHOICE_GAP : 0)
+  };
   // An emoji's advance box runs about 1.35x its font-size, so the width budget
   // has to be divided by that or the glyphs spill out of the card.
   const glyph = Math.floor(Math.min(
@@ -1506,19 +1522,7 @@ function sizeQuizChoiceContents(choice, width, height) {
 
   choice.style.setProperty("--quiz-cols", String(columns));
   choice.style.setProperty("--quiz-glyph", `${Math.max(glyph, 13)}px`);
-  choice.style.setProperty("--quiz-numeral", `${Math.max(Math.floor(height * 0.4), 22)}px`);
-
-  // The dot row has to wrap and shrink too: twenty dots in a single line are
-  // wider than the card.
-  const dotColumns = Math.min(count, 10);
-  const dotGap = 3;
-  const dotSize = clamp(
-    Math.floor((available.width - (dotColumns - 1) * dotGap) / dotColumns),
-    4,
-    10
-  );
-  choice.style.setProperty("--quiz-dot", `${dotSize}px`);
-  choice.style.setProperty("--quiz-dot-gap", `${dotGap}px`);
+  choice.style.setProperty("--quiz-numeral", `${Math.max(numeral, 22)}px`);
 }
 
 function layoutCardsInBand(cards, band) {
