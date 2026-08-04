@@ -754,6 +754,15 @@ button {
   animation: quiz-choice-in 280ms cubic-bezier(0.2, 1.3, 0.35, 1) both;
 }
 
+/* Dimmed and inert while the post-counting input lock is active, so a lingering
+   tap has nothing to land on and the child can see the choice is not ready yet.
+   Uses `filter` rather than `opacity`: the entrance animation drives `opacity`
+   with a `both` fill, which would otherwise outrank this rule in the cascade. */
+.quiz-choice:disabled {
+  filter: opacity(55%);
+  cursor: default;
+}
+
 /* A grid here, while the reference set on the stage sits in rows: the two must
    not look alike, or the answer can be found by matching shapes. */
 .quiz-choice-glyphs {
@@ -882,7 +891,7 @@ button {
 }
 
 .object-card--celebrate .object-symbol {
-  animation: object-symbol-cheer 760ms cubic-bezier(0.18, 1.35, 0.34, 1) var(--reward-delay, 0ms) both;
+  animation: object-symbol-dance 820ms ease-in-out var(--reward-delay, 0ms) infinite;
 }
 
 /* The glyph must stay inside its card: an emoji advance box runs ~1.35x its
@@ -1035,21 +1044,29 @@ button {
   }
 }
 
-@keyframes object-symbol-cheer {
+@keyframes object-symbol-dance {
   0% {
     transform: translateY(0) scale(1) rotate(0);
   }
 
-  38% {
-    transform: translateY(-18%) scale(1.22) rotate(-8deg);
+  22% {
+    transform: translateY(-26%) scale(1.24) rotate(calc(var(--dance-dir, 1) * -14deg));
   }
 
-  70% {
-    transform: translateY(5%) scale(0.98) rotate(5deg);
+  45% {
+    transform: translateY(4%) scale(0.96) rotate(calc(var(--dance-dir, 1) * 10deg));
+  }
+
+  68% {
+    transform: translateY(-16%) scale(1.14) rotate(calc(var(--dance-dir, 1) * -8deg));
+  }
+
+  86% {
+    transform: translateY(2%) scale(1.02) rotate(calc(var(--dance-dir, 1) * 5deg));
   }
 
   100% {
-    transform: translateY(0) scale(1.08) rotate(0);
+    transform: translateY(0) scale(1) rotate(0);
   }
 }
 

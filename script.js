@@ -164,7 +164,7 @@ const REPLAY_ON_CORRECT_CHOICES = [
   { id: "on", label: "켬" },
   { id: "off", label: "끔" }
 ];
-const QUIZ_INPUT_LOCK = 500;
+const QUIZ_INPUT_LOCK = 900;
 const QUIZ_CHOICE_GAP = 6;
 const TOUCH_CARD_MIN = 30;
 const TOUCH_CARD_MAX = 150;
@@ -1408,6 +1408,19 @@ async function startQuiz(token) {
   choices.forEach((choice) => objectStage.appendChild(choice));
   layoutQuizPhase(referenceCards, choices);
 
+  // Choices render disabled and only wake up once the lock expires, so a tap
+  // that lands during it is refused by the button itself, not just ignored by
+  // the handler.
+  window.setTimeout(() => {
+    if (appState.playbackToken !== token || !appState.quizPhase) {
+      return;
+    }
+
+    choices.forEach((choice) => {
+      choice.disabled = false;
+    });
+  }, QUIZ_INPUT_LOCK);
+
   cancelSpeech();
   speak(prompt);
 }
@@ -1448,6 +1461,9 @@ function buildQuizChoice(item, value, isCorrect) {
   }
 
   choice.setAttribute("aria-label", formatQuizChoiceLabel(item, value, showsNumeral, showsObjects));
+  // Starts disabled: a child still tapping from the counting step should not
+  // be able to land on a choice before it has had a moment to register.
+  choice.disabled = true;
   choice.addEventListener("click", () => handleQuizChoice(choice));
   return choice;
 }
@@ -1601,6 +1617,12 @@ async function handleQuizChoice(choice) {
   await playQuizPenalty(choice, token);
 }
 
+// The number is said first so the reward reads as confirming a specific count
+// ("여섯, 통통! 잘했어요!"), not just a generic cheer.
+function withNumberPrefix(number, text) {
+  return `${NUMBER_WORDS[number]}, ${text}`;
+}
+
 async function playQuizCorrect(choice, token) {
   const referenceCards = Array.from(objectStage.querySelectorAll(".object-card"));
   const reward = pickQuizRewardVariant();
@@ -1610,11 +1632,11 @@ async function playQuizCorrect(choice, token) {
   startCardCelebration(referenceCards);
   playStep.appendChild(overlay);
 
-  statusText.textContent = reward.phrase;
+  statusText.textContent = withNumberPrefix(appState.quizAnswer, reward.phrase);
   cancelSpeech();
 
   const soundPromise = playCheerSound();
-  const speechPromise = speak(reward.speech);
+  const speechPromise = speak(withNumberPrefix(appState.quizAnswer, reward.speech));
 
   try {
     await wait(REWARD_OVERLAY_HOLD);
@@ -1655,6 +1677,9 @@ function startCardCelebration(cards) {
   objectStage.classList.add("object-stage--celebrate");
   cards.forEach((card, index) => {
     card.style.setProperty("--reward-delay", `${Math.min(index * 45, 220)}ms`);
+    // Alternating tilt direction keeps the whole set from swaying in lockstep,
+    // so the group reads as dancing rather than one shape bouncing in unison.
+    card.style.setProperty("--dance-dir", index % 2 === 0 ? "1" : "-1");
     card.classList.add("object-card--celebrate");
   });
 }
@@ -1664,6 +1689,7 @@ function endCardCelebration(cards) {
   cards.forEach((card) => {
     card.classList.remove("object-card--celebrate");
     card.style.removeProperty("--reward-delay");
+    card.style.removeProperty("--dance-dir");
   });
 }
 
@@ -1907,13 +1933,13 @@ async function playCorrectReward(button, token, attemptCount) {
   const overlay = createInstantReward(reward);
   const cards = Array.from(objectStage.querySelectorAll(".object-card"));
 
-  statusText.textContent = reward.phrase;
+  statusText.textContent = withNumberPrefix(appState.selectedNumber, reward.phrase);
   button.classList.add("correct-answer");
   startCardCelebration(cards);
   playStep.appendChild(overlay);
 
   const soundPromise = playCheerSound();
-  const speechPromise = speak(reward.speech);
+  const speechPromise = speak(withNumberPrefix(appState.selectedNumber, reward.speech));
 
   try {
     await wait(REWARD_OVERLAY_HOLD);
