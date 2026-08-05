@@ -1618,9 +1618,11 @@ async function handleQuizChoice(choice) {
 }
 
 // The number is said first so the reward reads as confirming a specific count
-// ("여섯, 통통! 잘했어요!"), not just a generic cheer.
+// ("6, 통통! 잘했어요!"), not just a generic cheer. The numeral is used rather
+// than the counting word: it is what the answer card showed, and a ko-KR voice
+// reads a bare digit as "육", which is the reading the numeral is learned by.
 function withNumberPrefix(number, text) {
-  return `${NUMBER_WORDS[number]}, ${text}`;
+  return `${number}, ${text}`;
 }
 
 async function playQuizCorrect(choice, token) {
