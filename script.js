@@ -158,6 +158,9 @@ const REWARD_PARTICLE_COUNT = 18;
 
 const TOUCH_COUNT_MIN = 2;
 const TOUCH_COUNT_MAX = 20;
+// The stepper's minimum of 2 means the range "1~2"; a hand-picked list carries no
+// such implication, so a lone 1 is a legitimate round.
+const COUNT_VALUE_MIN = 1;
 const PENALTY_DELAY_MIN = 0;
 const PENALTY_DELAY_MAX = 30;
 const PENALTY_DELAY_STEP = 5;
@@ -205,6 +208,7 @@ const PROGRESS_STORAGE_KEY = "baby-count-progress";
 
 const touchSettings = {
   maxCount: 3,
+  allowedCounts: [],
   layout: "rows",
   quizType: "quantity",
   replayOnCorrect: true,
@@ -295,6 +299,7 @@ const dragState = {
 };
 
 let preferredSystemVoice = null;
+let syncCountStepper = null;
 
 const modeStep = document.getElementById("mode-step");
 const itemStep = document.getElementById("item-step");
@@ -309,6 +314,10 @@ const fullscreenButton = document.getElementById("fullscreen-button");
 const classicModeButton = document.getElementById("mode-classic");
 const touchModeButton = document.getElementById("mode-touch");
 const countOptions = document.getElementById("count-options");
+const countDetailToggle = document.getElementById("count-detail-toggle");
+const countDetail = document.getElementById("count-detail");
+const countListInput = document.getElementById("count-list-input");
+const countDetailClear = document.getElementById("count-detail-clear");
 const layoutOptions = document.getElementById("layout-options");
 const quizTypeOptions = document.getElementById("quiz-type-options");
 const replayOptions = document.getElementById("replay-options");
@@ -346,6 +355,10 @@ function loadTouchSettings() {
       touchSettings.maxCount = saved.maxCount;
     }
 
+    if (isCountList(saved.allowedCounts)) {
+      touchSettings.allowedCounts = saved.allowedCounts;
+    }
+
     if (TOUCH_LAYOUT_CHOICES.some((choice) => choice.id === saved.layout)) {
       touchSettings.layout = saved.layout;
     }
@@ -368,6 +381,56 @@ function loadTouchSettings() {
 
 function isWholeNumberInRange(value, min, max) {
   return Number.isInteger(value) && value >= min && value <= max;
+}
+
+// A duplicate would quietly bias the draw, and storage is not a surface anyone
+// edits on purpose, so a list that fails any part of this drops to the range
+// rather than being repaired.
+function isCountList(value) {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((entry) => isWholeNumberInRange(entry, COUNT_VALUE_MIN, TOUCH_COUNT_MAX)) &&
+    new Set(value).size === value.length
+  );
+}
+
+// One malformed token should not throw away the numbers the grown-up got right,
+// and this app has nowhere to put an error message. So parsing keeps whatever it
+// understands and the field is redrawn from the result: the value that comes back
+// is the only report there is.
+function parseCountList(text) {
+  const values = [];
+
+  String(text)
+    // A Korean IME left in full-width mode answers the comma key with ， or 、,
+    // neither of which is distinguishable by eye from the one that works.
+    .replace(/[，、]/g, ",")
+    .replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0))
+    // Whitespace separates too: the phone keypads that make digits easy are the
+    // ones that hide the comma.
+    .split(/[,\s]+/)
+    .forEach((token) => {
+      if (!/^\d+$/.test(token)) {
+        return;
+      }
+
+      const value = Number(token);
+
+      if (!isWholeNumberInRange(value, COUNT_VALUE_MIN, TOUCH_COUNT_MAX)) {
+        return;
+      }
+
+      if (!values.includes(value)) {
+        values.push(value);
+      }
+    });
+
+  return values.sort((a, b) => a - b);
+}
+
+function formatCountList(values) {
+  return values.join(", ");
 }
 
 function saveTouchSettings() {
@@ -560,18 +623,23 @@ function initModeSelection() {
   }
 
   // A stepper rather than one button per value: 2 through 20 is far too many
-  // buttons to sit in this row.
-  renderStepper(countOptions, {
+  // buttons to sit in this row. A hand-picked list overrides it, and then the
+  // stepper reads as switched off instead of vanishing.
+  syncCountStepper = renderStepper(countOptions, {
     min: TOUCH_COUNT_MIN,
     max: TOUCH_COUNT_MAX,
     step: 1,
     ariaLabel: "세는 개수",
     format: (value) => `1~${value}`,
+    inactive: () => touchSettings.allowedCounts.length > 0,
+    inactiveLabel: "직접 지정 중",
     get: () => touchSettings.maxCount,
     set: (value) => {
       touchSettings.maxCount = value;
     }
   });
+
+  initCountDetail();
 
   renderSettingOptions(layoutOptions, TOUCH_LAYOUT_CHOICES, () => touchSettings.layout, (id) => {
     touchSettings.layout = id;
@@ -1046,13 +1114,82 @@ function renderStepper(container, config) {
 
   const sync = () => {
     const current = config.get();
-    value.textContent = config.format(current);
-    decrease.disabled = current <= config.min;
-    increase.disabled = current >= config.max;
+    const isInactive = typeof config.inactive === "function" && config.inactive();
+
+    value.textContent = isInactive ? config.inactiveLabel : config.format(current);
+    container.classList.toggle("mode-stepper--inactive", isInactive);
+    // Left on screen rather than removed: the grown-up has to be able to see what
+    // clearing the override would go back to.
+    decrease.disabled = isInactive || current <= config.min;
+    increase.disabled = isInactive || current >= config.max;
   };
 
   container.append(decrease, value, increase);
   sync();
+  // Handed back so an override elsewhere can redraw it; steppers with no
+  // override simply ignore the return.
+  return sync;
+}
+
+function initCountDetail() {
+  if (!countDetailToggle || !countDetail || !countListInput) {
+    return;
+  }
+
+  countDetailToggle.addEventListener("click", () => {
+    setCountDetailOpen(countDetail.hidden);
+  });
+
+  // Committed on leaving the field rather than on every keystroke: rewriting the
+  // value mid-keystroke destroys the hangul syllable an IME is still assembling.
+  // Leaving the field is also what happens on the way to tapping 새 방식, so a
+  // number typed and never confirmed still counts.
+  countListInput.addEventListener("change", commitCountList);
+  countListInput.addEventListener("blur", commitCountList);
+
+  countListInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      countListInput.blur();
+    }
+  });
+
+  if (countDetailClear) {
+    countDetailClear.addEventListener("click", () => {
+      countListInput.value = "";
+      commitCountList();
+    });
+  }
+
+  countListInput.value = formatCountList(touchSettings.allowedCounts);
+  // A saved list outranks the stepper, so it is never left folded away where the
+  // grown-up cannot see why the range stopped applying.
+  setCountDetailOpen(touchSettings.allowedCounts.length > 0);
+  syncCountSetting();
+}
+
+function setCountDetailOpen(isOpen) {
+  countDetail.hidden = !isOpen;
+  countDetailToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+}
+
+function commitCountList() {
+  const parsed = parseCountList(countListInput.value);
+
+  touchSettings.allowedCounts = parsed;
+  saveTouchSettings();
+  countListInput.value = formatCountList(parsed);
+  syncCountSetting();
+}
+
+function syncCountSetting() {
+  if (syncCountStepper) {
+    syncCountStepper();
+  }
+
+  // The highlight means "a list is in force", not "the panel is open" — the open
+  // panel says that for itself.
+  countDetailToggle.classList.toggle("selected", touchSettings.allowedCounts.length > 0);
 }
 
 function syncSettingOptions(container, currentValue) {
@@ -1075,7 +1212,7 @@ function enterMode(mode) {
   // Reserve the tally row up front for the same reason the answer grid is
   // reserved: a stage that resizes mid-round clips objects out of view.
   if (isTouch) {
-    renderTallyStrip(touchSettings.maxCount, 0);
+    renderTallyStrip(countCeiling(), 0);
   }
 
   renderItemSelection();
@@ -1140,28 +1277,51 @@ function selectItem(itemId) {
   }
 
   if (appState.mode === "touch") {
-    appState.selectedNumber = pickCountTarget(touchSettings.maxCount);
+    appState.selectedNumber = pickCountTarget(countPool());
     startTouchRound();
     return;
   }
 
-  appState.selectedNumber = pickCountTarget(MAX_NUMBER);
+  appState.selectedNumber = pickCountTarget(rangePool(MAX_NUMBER));
   playCounting();
 }
 
-function pickCountTarget(maxCount) {
-  if (maxCount <= 1) {
+function rangePool(max) {
+  return Array.from({ length: max }, (_, index) => index + 1);
+}
+
+// Every read of "what may a round ask for" goes through here, so the hand-picked
+// list and the 1~N stepper can never disagree about it. A list is a deliberate
+// act typed over the range, so it outranks the range.
+function countPool() {
+  return touchSettings.allowedCounts.length > 0
+    ? touchSettings.allowedCounts
+    : rangePool(touchSettings.maxCount);
+}
+
+// The tally reserves slots for the largest count the setting can ever produce,
+// never the round's own number: a strip that resizes mid-round moves the stage
+// out from under the objects the child is still counting.
+function countCeiling() {
+  return touchSettings.allowedCounts.length > 0
+    ? Math.max(...touchSettings.allowedCounts)
+    : touchSettings.maxCount;
+}
+
+function pickCountTarget(pool) {
+  if (pool.length === 0) {
     return 1;
   }
 
-  // The no-repeat rule keeps a wide range from stalling on one number, but over a
-  // range of two it turns the round into a perfect alternation the child can
-  // follow without counting anything. There, repeats are the lesser evil.
-  const avoidRepeat = maxCount > 2;
-  let number = Math.floor(Math.random() * maxCount) + 1;
+  // The no-repeat rule keeps a wide pool from stalling on one number, but over a
+  // pool of two it turns the round into a perfect alternation the child can
+  // follow without counting anything. There, repeats are the lesser evil — and a
+  // pool of one has nothing to alternate with at all.
+  const avoidRepeat = pool.length > 2;
+  let number = pool[Math.floor(Math.random() * pool.length)];
 
   while (avoidRepeat && number === appState.lastNumber) {
-    number = Math.floor(Math.random() * maxCount) + 1;
+    number = pool[Math.floor(Math.random() * pool.length)];
   }
 
   appState.lastNumber = number;
@@ -1255,7 +1415,7 @@ function startTouchRound() {
   appState.isRevealInProgress = false;
   statusText.textContent = item.name;
   resultLabel.textContent = item.name;
-  renderTallyStrip(touchSettings.maxCount, 0);
+  renderTallyStrip(countCeiling(), 0);
   showStep("play");
 
   // Sized before any card exists, so the very first placement already knows how
@@ -1301,7 +1461,7 @@ function handleTouchCount(card) {
   // The tone is synchronous so the tap always answers instantly, whatever the
   // speech engine decides to do.
   playCountTone(step);
-  renderTallyStrip(touchSettings.maxCount, step);
+  renderTallyStrip(countCeiling(), step);
 
   const token = nextPlaybackToken();
   statusText.textContent = NUMBER_WORDS[step];
@@ -1365,15 +1525,15 @@ function resolveQuizType() {
 }
 
 // The distractor carries the difficulty. A gap of 2 or more is discriminable by
-// sight; a gap of 1 forces an actual count, so it is only used when the range
+// sight; a gap of 1 forces an actual count, so it is only used when the pool
 // leaves no other option.
-function pickDistractor(answer, maxCount) {
+function pickDistractor(answer, pool) {
   const far = [];
   const near = [];
 
-  for (let value = 1; value <= maxCount; value += 1) {
+  pool.forEach((value) => {
     if (value === answer) {
-      continue;
+      return;
     }
 
     if (Math.abs(value - answer) >= 2) {
@@ -1381,15 +1541,17 @@ function pickDistractor(answer, maxCount) {
     } else {
       near.push(value);
     }
-  }
+  });
 
-  const pool = far.length > 0 ? far : near;
+  const choices = far.length > 0 ? far : near;
 
-  if (pool.length === 0) {
+  // A pool of one holds no wrong answer, so the quiz borrows the neighbour it
+  // would otherwise never offer: a question with one card is not a choice.
+  if (choices.length === 0) {
     return answer === 1 ? 2 : answer - 1;
   }
 
-  return pool[Math.floor(Math.random() * pool.length)];
+  return choices[Math.floor(Math.random() * choices.length)];
 }
 
 async function startQuiz(token) {
@@ -1409,7 +1571,7 @@ async function startQuiz(token) {
 
   // Emptying the tally removes the shortcut: with the dots still filled the
   // child could copy their count straight onto a choice card.
-  renderTallyStrip(touchSettings.maxCount, 0);
+  renderTallyStrip(countCeiling(), 0);
 
   objectStage.classList.remove("object-stage--celebrate");
   const referenceCards = Array.from(objectStage.querySelectorAll(".object-card"));
@@ -1419,7 +1581,7 @@ async function startQuiz(token) {
     card.classList.add("object-card--reference");
   });
 
-  const distractor = pickDistractor(answer, touchSettings.maxCount);
+  const distractor = pickDistractor(answer, countPool());
   const values = Math.random() < 0.5 ? [answer, distractor] : [distractor, answer];
   const choices = values.map((value) => buildQuizChoice(item, value, value === answer));
 
@@ -2343,7 +2505,7 @@ function resetToHome() {
   answerGrid.classList.remove("answer-grid--pending", "answer-grid--locked");
 
   if (appState.mode === "touch") {
-    renderTallyStrip(touchSettings.maxCount, 0);
+    renderTallyStrip(countCeiling(), 0);
   }
   statusText.textContent = "";
   resultLabel.textContent = "";
@@ -2620,6 +2782,14 @@ function lockZoomGestures() {
     (event) => {
       const now = Date.now();
 
+      // Text entry needs double taps of its own to place the caret, and a
+      // prevented touchend also swallows the click that would focus the field,
+      // so the double-tap guard steps aside inside an input.
+      if (event.target.closest("input")) {
+        lastTouchEnd = now;
+        return;
+      }
+
       if (now - lastTouchEnd <= 320) {
         event.preventDefault();
       }
@@ -2640,6 +2810,10 @@ function lockZoomGestures() {
   });
 
   document.addEventListener("dblclick", (event) => {
+    if (event.target.closest("input")) {
+      return;
+    }
+
     event.preventDefault();
   });
 

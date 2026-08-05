@@ -272,6 +272,63 @@ button {
   text-align: center;
 }
 
+/* A hand-picked list overrides the range, so the stepper stays on screen but
+   reads as switched off: what clearing the list returns to must stay legible. */
+.mode-stepper--inactive .mode-stepper-value {
+  color: var(--text-soft);
+  opacity: 0.7;
+}
+
+/* Full width so it wraps onto its own line directly under the count row it
+   belongs to, without restructuring the settings flex row. */
+.count-detail {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The flex above outranks the hidden attribute's own display: none. */
+.count-detail[hidden] {
+  display: none;
+}
+
+.count-detail-input {
+  flex: 1 1 150px;
+  min-width: 0;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(217, 108, 47, 0.2);
+  color: var(--text-main);
+  font-family: inherit;
+  /* Below 16px iOS Safari zooms the page on focus, and this app holds pinch-zoom
+     shut, so there would be no way back out. */
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.count-detail-input::placeholder {
+  color: var(--text-soft);
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+.count-detail-input:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.count-detail-hint {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
 /* The record is read by the grown-up, so it stays restrained on purpose: thin
    bars, hairline axes, no toy styling. */
 .progress-block {

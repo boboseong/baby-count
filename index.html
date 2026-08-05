@@ -34,6 +34,13 @@
             <div class="mode-setting">
               <span class="mode-setting-label">세는 개수</span>
               <div id="count-options" class="mode-setting-options" role="group" aria-label="세는 개수"></div>
+              <button id="count-detail-toggle" class="mode-setting-option" type="button" aria-expanded="false" aria-controls="count-detail">상세</button>
+            </div>
+            <div id="count-detail" class="count-detail" hidden>
+              <label class="mode-setting-label" for="count-list-input">숫자 직접 지정</label>
+              <input id="count-list-input" class="count-detail-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" placeholder="예: 3, 5, 7" aria-describedby="count-detail-hint">
+              <button id="count-detail-clear" class="mode-setting-option" type="button">지우기</button>
+              <p id="count-detail-hint" class="count-detail-hint">쉼표로 나누어 적으면 그 숫자들만 나와요. 비우면 위의 범위로 돌아갑니다.</p>
             </div>
             <div class="mode-setting">
               <span class="mode-setting-label">물체 배치</span>
