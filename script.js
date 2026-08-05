@@ -189,7 +189,7 @@ const TOUCH_CARD_MAX = 150;
 // Long enough for the reward overlay to finish its animation: cutting it off
 // mid-burst reads as the app losing interest first.
 const REWARD_OVERLAY_HOLD = 1500;
-const JACKPOT_CHANCE = 0.2;
+const JACKPOT_CHANCE = 0.1;
 const JACKPOT_PARTICLE_COUNT = 54;
 // The confetti rain needs longer to cross the screen than the burst does to
 // fade, so the jackpot holds well past the usual reward.
