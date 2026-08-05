@@ -128,6 +128,24 @@ const REWARD_GROUPS = {
       speech: "끝까지 해냈어요!",
       symbols: ["🌈", "👏", "💚", "✨"]
     }
+  ],
+  // Drawn by chance rather than by attempt count, so any correct answer can
+  // turn out to be the loud one and the treat stays unpredictable.
+  jackpot: [
+    {
+      id: "jackpot-fireworks",
+      tier: "jackpot",
+      phrase: "우와! 최고예요!",
+      speech: "우와! 최고예요!",
+      symbols: ["🎆", "✨", "🌟", "🎊"]
+    },
+    {
+      id: "jackpot-applause",
+      tier: "jackpot",
+      phrase: "대단해요! 짝짝짝!",
+      speech: "대단해요! 짝짝짝!",
+      symbols: ["🎉", "👏", "⭐", "💛"]
+    }
   ]
 };
 
@@ -171,6 +189,11 @@ const TOUCH_CARD_MAX = 150;
 // Long enough for the reward overlay to finish its animation: cutting it off
 // mid-burst reads as the app losing interest first.
 const REWARD_OVERLAY_HOLD = 1500;
+const JACKPOT_CHANCE = 0.2;
+const JACKPOT_PARTICLE_COUNT = 54;
+// The confetti rain needs longer to cross the screen than the burst does to
+// fade, so the jackpot holds well past the usual reward.
+const JACKPOT_OVERLAY_HOLD = 2600;
 const DEMO_STEP_DELAY = 700;
 const PROGRESS_LOG_LIMIT = 4000;
 const MOVING_AVERAGE_WINDOW = 10;
@@ -1627,21 +1650,22 @@ function withNumberPrefix(number, text) {
 
 async function playQuizCorrect(choice, token) {
   const referenceCards = Array.from(objectStage.querySelectorAll(".object-card"));
-  const reward = pickQuizRewardVariant();
+  const reward = rollJackpotOver(pickQuizRewardVariant);
+  const jackpot = isJackpotReward(reward);
   const overlay = createInstantReward(reward);
 
   choice.classList.add("quiz-choice--correct");
-  startCardCelebration(referenceCards);
+  startCardCelebration(referenceCards, jackpot);
   playStep.appendChild(overlay);
 
   statusText.textContent = withNumberPrefix(appState.quizAnswer, reward.phrase);
   cancelSpeech();
 
-  const soundPromise = playCheerSound();
+  const soundPromise = jackpot ? playFanfareSound() : playCheerSound();
   const speechPromise = speak(withNumberPrefix(appState.quizAnswer, reward.speech));
 
   try {
-    await wait(REWARD_OVERLAY_HOLD);
+    await wait(jackpot ? JACKPOT_OVERLAY_HOLD : REWARD_OVERLAY_HOLD);
     await Promise.allSettled([soundPromise, speechPromise]);
   } finally {
     // The overlay lives on the step, not the stage, so nothing else sweeps it up
@@ -1675,7 +1699,24 @@ function pickQuizRewardVariant() {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function startCardCelebration(cards) {
+// The jackpot sits on top of the attempt tiers rather than replacing one: the
+// tiers say how the answer was earned, this says how loudly it is celebrated.
+function rollJackpotOver(pickNormalReward) {
+  if (Math.random() >= JACKPOT_CHANCE) {
+    return pickNormalReward();
+  }
+
+  const pool = REWARD_GROUPS.jackpot;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// The reward carries its own loudness, so the overlay, the sound, the card
+// animation and the hold all read it from one place.
+function isJackpotReward(reward) {
+  return reward.tier === "jackpot";
+}
+
+function startCardCelebration(cards, jackpot = false) {
   objectStage.classList.add("object-stage--celebrate");
   cards.forEach((card, index) => {
     card.style.setProperty("--reward-delay", `${Math.min(index * 45, 220)}ms`);
@@ -1683,6 +1724,7 @@ function startCardCelebration(cards) {
     // so the group reads as dancing rather than one shape bouncing in unison.
     card.style.setProperty("--dance-dir", index % 2 === 0 ? "1" : "-1");
     card.classList.add("object-card--celebrate");
+    card.classList.toggle("object-card--jackpot", jackpot);
   });
 }
 
@@ -1690,6 +1732,7 @@ function endCardCelebration(cards) {
   objectStage.classList.remove("object-stage--celebrate");
   cards.forEach((card) => {
     card.classList.remove("object-card--celebrate");
+    card.classList.remove("object-card--jackpot");
     card.style.removeProperty("--reward-delay");
     card.style.removeProperty("--dance-dir");
   });
@@ -1931,20 +1974,21 @@ async function handleAnswer(number, button) {
 }
 
 async function playCorrectReward(button, token, attemptCount) {
-  const reward = pickRewardVariant(attemptCount);
+  const reward = rollJackpotOver(() => pickRewardVariant(attemptCount));
+  const jackpot = isJackpotReward(reward);
   const overlay = createInstantReward(reward);
   const cards = Array.from(objectStage.querySelectorAll(".object-card"));
 
   statusText.textContent = withNumberPrefix(appState.selectedNumber, reward.phrase);
   button.classList.add("correct-answer");
-  startCardCelebration(cards);
+  startCardCelebration(cards, jackpot);
   playStep.appendChild(overlay);
 
-  const soundPromise = playCheerSound();
+  const soundPromise = jackpot ? playFanfareSound() : playCheerSound();
   const speechPromise = speak(withNumberPrefix(appState.selectedNumber, reward.speech));
 
   try {
-    await wait(REWARD_OVERLAY_HOLD);
+    await wait(jackpot ? JACKPOT_OVERLAY_HOLD : REWARD_OVERLAY_HOLD);
     await Promise.allSettled([soundPromise, speechPromise]);
   } finally {
     overlay.remove();
@@ -1989,16 +2033,33 @@ function createInstantReward(reward) {
 
   const displayItem = appState.selectedDisplayItem;
   const symbols = displayItem ? [displayItem.symbol, ...reward.symbols] : reward.symbols;
+  const jackpot = isJackpotReward(reward);
+  const particleCount = jackpot ? JACKPOT_PARTICLE_COUNT : REWARD_PARTICLE_COUNT;
 
-  for (let index = 0; index < REWARD_PARTICLE_COUNT; index += 1) {
+  for (let index = 0; index < particleCount; index += 1) {
     const particle = document.createElement("span");
     particle.className = "instant-reward-particle";
     particle.textContent = symbols[index % symbols.length];
-    particle.style.setProperty("--x", `${randomBetween(-42, 42)}vw`);
-    particle.style.setProperty("--y", `${randomBetween(-34, 26)}vh`);
-    particle.style.setProperty("--spin", `${randomBetween(-70, 70)}deg`);
-    particle.style.setProperty("--delay", `${index * 34}ms`);
-    particle.style.setProperty("--size", `${randomBetween(1.3, 2.7).toFixed(2)}rem`);
+
+    if (jackpot) {
+      // Confetti rain: each piece gets its own column above the top edge and
+      // falls past the bottom, instead of every piece bursting from the middle.
+      // The delay is random rather than indexed so the fall never looks like a
+      // sweep across the screen.
+      particle.style.setProperty("--rain-x", `${randomBetween(2, 98).toFixed(1)}%`);
+      particle.style.setProperty("--x", `${randomBetween(-9, 9)}vw`);
+      particle.style.setProperty("--y", `${randomBetween(108, 134)}vh`);
+      particle.style.setProperty("--spin", `${randomBetween(-260, 260)}deg`);
+      particle.style.setProperty("--delay", `${Math.round(randomBetween(0, 900))}ms`);
+      particle.style.setProperty("--size", `${randomBetween(1.8, 4).toFixed(2)}rem`);
+    } else {
+      particle.style.setProperty("--x", `${randomBetween(-42, 42)}vw`);
+      particle.style.setProperty("--y", `${randomBetween(-34, 26)}vh`);
+      particle.style.setProperty("--spin", `${randomBetween(-70, 70)}deg`);
+      particle.style.setProperty("--delay", `${index * 34}ms`);
+      particle.style.setProperty("--size", `${randomBetween(1.3, 2.7).toFixed(2)}rem`);
+    }
+
     overlay.appendChild(particle);
   }
 
@@ -2686,6 +2747,34 @@ function playCheerSound() {
     });
 
     window.setTimeout(resolve, 520);
+  });
+}
+
+// The jackpot is richer, not louder: the peak gain matches the usual cheer, and
+// only the number of notes grows, so a tablet held close cannot startle a child.
+function playFanfareSound() {
+  return new Promise((resolve) => {
+    const context = getAudioContext();
+
+    if (!context) {
+      resolve();
+      return;
+    }
+
+    const rise = [523.25, 587.33, 659.25, 783.99, 880, 1046.5];
+
+    rise.forEach((frequency, index) => {
+      playTone(context, frequency, index * 0.09, 0.24);
+    });
+
+    // A held major chord under the last step, so the run lands instead of just
+    // stopping.
+    const chordStart = rise.length * 0.09 + 0.04;
+    [659.25, 830.61, 1046.5].forEach((frequency) => {
+      playTone(context, frequency, chordStart, 0.7, 0.16);
+    });
+
+    window.setTimeout(resolve, 1400);
   });
 }
 
