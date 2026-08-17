@@ -1526,7 +1526,17 @@ button {
     inset 0 0 26px rgba(255, 241, 109, 0.42);
 }
 
-.g3-group {
+/* The array packs into one rectangle instead of wrapping loose boxes, so the
+   stage stops centring wrapped children and just holds the block. */
+.g3-stage--array {
+  align-content: center;
+  align-items: center;
+}
+
+/* A band is one `unit` of objects: a dashed box under 묶음, one row of the
+   rectangle under 배열. Both are lit one at a time by the skip-counting demo,
+   which is why they share a class and the highlight below. */
+.g3-band--group {
   display: grid;
   grid-template-columns: repeat(var(--g3-cols, 3), 1fr);
   gap: 4px;
@@ -1539,19 +1549,75 @@ button {
   transition: border-color 200ms ease, background 200ms ease;
 }
 
-.g3-group--active {
+.g3-band--group.g3-band--active {
   border-style: solid;
   border-color: rgba(73, 212, 187, 0.72);
   background: rgba(230, 251, 243, 0.92);
 }
 
-.g3-group--celebrate .g3-item {
+.g3-band--celebrate .g3-item {
   animation: object-symbol-dance 820ms ease-in-out var(--reward-delay, 0ms) infinite;
 }
 
+/* Rows carry no border of their own: the rectangle has to read as one solid
+   block, or it is just the group layout with tighter spacing. */
+.g3-band--row {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  padding: 2px 4px;
+  border-radius: 8px;
+  transition: background 200ms ease;
+}
+
+.g3-band--row.g3-band--active {
+  background: rgba(73, 212, 187, 0.28);
+}
+
+/* Grid areas rather than nested flex rows, so the 가로 label centres over the
+   objects and not over the 세로 label beside them. */
+.g3-array {
+  display: grid;
+  grid-template-areas:
+    ".    top"
+    "side grid";
+  grid-template-columns: auto auto;
+  gap: 4px 6px;
+  align-items: center;
+  justify-items: center;
+}
+
+.g3-array-grid {
+  grid-area: grid;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow: inset 0 0 0 2px rgba(217, 108, 47, 0.28);
+}
+
+.g3-axis {
+  color: var(--accent-strong);
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.g3-axis--top {
+  grid-area: top;
+}
+
+/* Turned to run alongside the edge it counts, the way an axis label does. */
+.g3-axis--side {
+  grid-area: side;
+  writing-mode: vertical-rl;
+}
+
 .g3-item {
-  font-size: clamp(1.5rem, 4.2vh, 2.5rem);
-  line-height: 1;
+  font-size: var(--g3-glyph, 1.6rem);
+  line-height: 1.15;
   text-align: center;
 }
 

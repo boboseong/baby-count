@@ -2993,11 +2993,43 @@ const GRADE3_INPUT_METHOD_CHOICES = [
   { id: "choice", label: "객관식 카드" },
   { id: "keypad", label: "숫자 키패드" }
 ];
+// 묶음 shows "n개씩 m묶음" as separated boxes; 배열 packs the same objects into
+// one rectangle, which is the model that makes 7×5 and 5×7 visibly the same
+// thing. Neither subsumes the other, so the grown-up picks, and 랜덤 alternates.
+const GRADE3_SHAPE_CHOICES = [
+  { id: "group", label: "묶음" },
+  { id: "array", label: "배열" },
+  { id: "random", label: "랜덤" }
+];
+const GRADE3_DRAWABLE_SHAPES = ["group", "array"];
 const GRADE3_CHOICE_COUNT = 4;
 const GRADE3_PENALTY_DELAY_MIN = 0;
 const GRADE3_PENALTY_DELAY_MAX = 30;
 const GRADE3_PENALTY_DELAY_STEP = 5;
 const GRADE3_KEYPAD_MAX_DIGITS = 3;
+// Nine rows of nine has to fit the same stage three rows of two does, so the
+// glyph is measured per round rather than set in the stylesheet.
+const GRADE3_GLYPH_MIN = 9;
+const GRADE3_GLYPH_MAX = 42;
+// An emoji's advance box runs about 1.35x its font-size, and its line box about
+// 1.15x: sizing by font-size alone overflows the stage sideways first.
+const GRADE3_GLYPH_ADVANCE = 1.35;
+const GRADE3_GLYPH_LINE = 1.15;
+const GRADE3_CELL_GAP = 4;
+const GRADE3_BAND_GAP = 10;
+// Everything the stylesheet adds around the objects themselves, so the estimate
+// below is measuring the same box the browser will lay out: a group's padding
+// plus border, a row's padding, the rectangle's padding, and the 가로/세로
+// labels flanking it.
+const GRADE3_GROUP_BOX = 24;
+const GRADE3_ROW_PAD_X = 8;
+const GRADE3_ROW_PAD_Y = 4;
+const GRADE3_ARRAY_PAD = 12;
+const GRADE3_AXIS_TOP = 22;
+const GRADE3_AXIS_SIDE = 22;
+// Emoji metrics vary enough between platforms that no estimate is final; this
+// caps how many corrective passes the fit is allowed.
+const GRADE3_FIT_PASSES = 5;
 const GRADE3_DEMO_STEP_DELAY = 550;
 const GRADE3_REWARD_HOLD = 1500;
 const GRADE3_JACKPOT_HOLD = 2600;
@@ -3024,6 +3056,7 @@ const grade3Settings = {
   unitMin: GRADE3_UNIT_MIN,
   unitMax: GRADE3_UNIT_MAX,
   inputMethod: "choice",
+  shape: "array",
   penaltyDelay: 8
 };
 
@@ -3041,6 +3074,10 @@ const grade3State = {
   answer: 0,
   lastUnit: null,
   lastItemId: null,
+  // The shape actually drawn this round: under 랜덤 the setting does not say
+  // which one it is, and the demo and the celebration both have to agree with
+  // what is on screen.
+  shape: "group",
   answered: false,
   locked: false,
   keypadEntry: "",
@@ -3054,6 +3091,7 @@ const grade3ModeButton = document.getElementById("mode-grade3");
 const grade3UnitMinOptions = document.getElementById("g3-unit-min-options");
 const grade3UnitMaxOptions = document.getElementById("g3-unit-max-options");
 const grade3InputMethodOptions = document.getElementById("g3-input-method-options");
+const grade3ShapeOptions = document.getElementById("g3-shape-options");
 const grade3PenaltyOptions = document.getElementById("g3-penalty-options");
 const grade3ProgressSummary = document.getElementById("g3-progress-summary");
 const grade3UnitAccuracy = document.getElementById("g3-unit-accuracy");
@@ -3107,6 +3145,10 @@ function loadGrade3Settings() {
 
     if (GRADE3_INPUT_METHOD_CHOICES.some((choice) => choice.id === saved.inputMethod)) {
       grade3Settings.inputMethod = saved.inputMethod;
+    }
+
+    if (GRADE3_SHAPE_CHOICES.some((choice) => choice.id === saved.shape)) {
+      grade3Settings.shape = saved.shape;
     }
 
     if (isWholeNumberInRange(saved.penaltyDelay, GRADE3_PENALTY_DELAY_MIN, GRADE3_PENALTY_DELAY_MAX)) {
@@ -3440,6 +3482,15 @@ function initGrade3Mode() {
     }
   );
 
+  renderGrade3SettingOptions(
+    grade3ShapeOptions,
+    GRADE3_SHAPE_CHOICES,
+    () => grade3Settings.shape,
+    (id) => {
+      grade3Settings.shape = id;
+    }
+  );
+
   renderGrade3Stepper(grade3PenaltyOptions, {
     min: GRADE3_PENALTY_DELAY_MIN,
     max: GRADE3_PENALTY_DELAY_MAX,
@@ -3529,6 +3580,7 @@ function startGrade3Round() {
   grade3State.unit = unit;
   grade3State.multiplier = multiplier;
   grade3State.answer = unit * multiplier;
+  grade3State.shape = resolveGrade3Shape();
   grade3State.answered = false;
   grade3State.locked = false;
   grade3State.keypadEntry = "";
@@ -3537,11 +3589,13 @@ function startGrade3Round() {
   grade3Stage.classList.remove("g3-stage--celebrate");
   grade3Choices.innerHTML = "";
 
-  renderGrade3Groups(item, unit, multiplier);
-
   grade3ProblemLabel.textContent = `${unit} × ${multiplier}`;
 
-  const prompt = `${item.name} ${unit}개씩 ${multiplier}묶음이에요. 모두 몇 개일까요?`;
+  // The prompt names what is actually drawn: calling a rectangle "묶음" asks the
+  // child to see a grouping the picture does not show.
+  const prompt = grade3State.shape === "array"
+    ? `${item.name} 한 줄에 ${unit}개씩 ${multiplier}줄이에요. 모두 몇 개일까요?`
+    : `${item.name} ${unit}개씩 ${multiplier}묶음이에요. 모두 몇 개일까요?`;
   grade3StatusText.textContent = prompt;
 
   if (grade3Settings.inputMethod === "keypad") {
@@ -3554,27 +3608,198 @@ function startGrade3Round() {
     renderGrade3Choices(grade3State.answer);
   }
 
+  // Last, because the stage is the flex child that absorbs whatever the prompt
+  // and the answer row leave behind. Sizing the objects before those exist
+  // measures a stage taller than the one they will actually sit in, and the
+  // bottom row ends up cut off.
+  renderGrade3Shape(item, unit, multiplier, grade3State.shape);
+
   speak(prompt);
 }
 
+function resolveGrade3Shape() {
+  if (grade3Settings.shape !== "random") {
+    return grade3Settings.shape;
+  }
+
+  const index = Math.floor(Math.random() * GRADE3_DRAWABLE_SHAPES.length);
+  return GRADE3_DRAWABLE_SHAPES[index];
+}
+
+// A local twin of getStageInnerSize, which reads the counting modes' own stage
+// from a module global. Offsets resolve against the padding box, so the stage
+// padding comes off the range or the rectangle hangs over the rounded edge.
+function getGrade3StageInnerSize() {
+  const stageStyle = window.getComputedStyle(grade3Stage);
+  const padX = Number.parseFloat(stageStyle.paddingLeft) + Number.parseFloat(stageStyle.paddingRight);
+  const padY = Number.parseFloat(stageStyle.paddingTop) + Number.parseFloat(stageStyle.paddingBottom);
+
+  return {
+    width: Math.max(grade3Stage.clientWidth - padX, 0),
+    height: Math.max(grade3Stage.clientHeight - padY, 0)
+  };
+}
+
+function buildGrade3Band(item, count, modifier) {
+  const band = document.createElement("div");
+  band.className = `g3-band g3-band--${modifier}`;
+
+  for (let index = 0; index < count; index += 1) {
+    const glyph = document.createElement("span");
+    glyph.className = "g3-item";
+    glyph.textContent = item.symbol;
+    band.appendChild(glyph);
+  }
+
+  return band;
+}
+
+// One rectangle, `unit` wide and `multiplier` tall. Each row is a band, so the
+// skip-counting demo lights one row at a time exactly as it lights one group.
+function renderGrade3Array(item, unit, multiplier) {
+  const array = document.createElement("div");
+  array.className = "g3-array";
+
+  const top = document.createElement("span");
+  top.className = "g3-axis g3-axis--top";
+  top.textContent = `가로 ${unit}`;
+  array.appendChild(top);
+
+  const side = document.createElement("span");
+  side.className = "g3-axis g3-axis--side";
+  side.textContent = `세로 ${multiplier}`;
+  array.appendChild(side);
+
+  const grid = document.createElement("div");
+  grid.className = "g3-array-grid";
+
+  for (let row = 0; row < multiplier; row += 1) {
+    grid.appendChild(buildGrade3Band(item, unit, "row"));
+  }
+
+  array.appendChild(grid);
+  grade3Stage.appendChild(array);
+}
+
 function renderGrade3Groups(item, unit, multiplier) {
-  const columns = Math.min(unit, 3);
+  const columns = grade3GroupColumns(unit);
 
   for (let group = 0; group < multiplier; group += 1) {
-    const groupNode = document.createElement("div");
-    groupNode.className = "g3-group";
-    groupNode.dataset.groupIndex = String(group);
-    groupNode.style.setProperty("--g3-cols", String(columns));
+    const band = buildGrade3Band(item, unit, "group");
+    band.style.setProperty("--g3-cols", String(columns));
+    grade3Stage.appendChild(band);
+  }
+}
 
-    for (let index = 0; index < unit; index += 1) {
-      const glyph = document.createElement("span");
-      glyph.className = "g3-item";
-      glyph.textContent = item.symbol;
-      groupNode.appendChild(glyph);
+function grade3GroupColumns(unit) {
+  return Math.min(unit, 3);
+}
+
+function renderGrade3Shape(item, unit, multiplier, shape) {
+  grade3Stage.classList.toggle("g3-stage--array", shape === "array");
+  grade3Stage.style.setProperty("--g3-glyph", `${measureGrade3Glyph(unit, multiplier, shape)}px`);
+
+  if (shape === "array") {
+    renderGrade3Array(item, unit, multiplier);
+  } else {
+    renderGrade3Groups(item, unit, multiplier);
+  }
+
+  shrinkGrade3GlyphToFit();
+}
+
+// The estimate works from the stylesheet's own numbers, but an emoji's advance
+// box is a font decision and differs across platforms, so the last word belongs
+// to the rendered result. Every object has to stay on screen — a set the child
+// has to scroll to see is a set they cannot count.
+function shrinkGrade3GlyphToFit() {
+  for (let pass = 0; pass < GRADE3_FIT_PASSES; pass += 1) {
+    const overflowX = grade3Stage.scrollWidth - grade3Stage.clientWidth;
+    const overflowY = grade3Stage.scrollHeight - grade3Stage.clientHeight;
+
+    if (overflowX <= 0 && overflowY <= 0) {
+      return;
     }
 
-    grade3Stage.appendChild(groupNode);
+    const current = Number.parseFloat(grade3Stage.style.getPropertyValue("--g3-glyph"));
+
+    if (!Number.isFinite(current) || current <= GRADE3_GLYPH_MIN) {
+      return;
+    }
+
+    const ratio = Math.min(
+      grade3Stage.clientWidth / grade3Stage.scrollWidth,
+      grade3Stage.clientHeight / grade3Stage.scrollHeight
+    );
+    // The padding around the objects does not shrink with them, so scaling by
+    // the overflow ratio alone converges slowly; the extra pixel guarantees
+    // each pass actually moves.
+    const next = Math.max(GRADE3_GLYPH_MIN, Math.floor(current * ratio) - 1);
+
+    if (next >= current) {
+      return;
+    }
+
+    grade3Stage.style.setProperty("--g3-glyph", `${next}px`);
   }
+}
+
+// The glyph is whatever still lets the whole set fit the stage, the same bargain
+// computeTouchCardSize strikes for the counting modes' cards. Sizing from the
+// stage rather than the rendered content means this can run before the objects
+// exist, so nothing is ever painted at the wrong size and resized after.
+function measureGrade3Glyph(unit, multiplier, shape) {
+  const inner = getGrade3StageInnerSize();
+
+  if (inner.width <= 0 || inner.height <= 0) {
+    return GRADE3_GLYPH_MIN;
+  }
+
+  const best = shape === "array"
+    ? fitGrade3Array(inner, unit, multiplier)
+    : fitGrade3Groups(inner, unit, multiplier);
+
+  return clamp(Math.floor(best), GRADE3_GLYPH_MIN, GRADE3_GLYPH_MAX);
+}
+
+function fitGrade3Array(inner, columns, rows) {
+  const width =
+    inner.width - GRADE3_AXIS_SIDE - GRADE3_ARRAY_PAD - GRADE3_ROW_PAD_X -
+    (columns - 1) * GRADE3_CELL_GAP;
+  const height =
+    inner.height - GRADE3_AXIS_TOP - GRADE3_ARRAY_PAD - rows * GRADE3_ROW_PAD_Y -
+    (rows - 1) * GRADE3_CELL_GAP;
+
+  return Math.min(
+    width / (columns * GRADE3_GLYPH_ADVANCE),
+    height / (rows * GRADE3_GLYPH_LINE)
+  );
+}
+
+// The groups wrap, so how big they can be depends on how many sit per row.
+// Tries every count and keeps the arrangement that allows the largest glyph —
+// the same search computeTouchCardSize runs over column counts.
+function fitGrade3Groups(inner, unit, multiplier) {
+  const columns = grade3GroupColumns(unit);
+  const rows = Math.ceil(unit / columns);
+  const boxExtraX = GRADE3_GROUP_BOX + (columns - 1) * GRADE3_CELL_GAP;
+  const boxExtraY = GRADE3_GROUP_BOX + (rows - 1) * GRADE3_CELL_GAP;
+  let best = 0;
+
+  for (let perRow = 1; perRow <= multiplier; perRow += 1) {
+    const boxRows = Math.ceil(multiplier / perRow);
+    const width =
+      inner.width - (perRow - 1) * GRADE3_BAND_GAP - perRow * boxExtraX;
+    const height =
+      inner.height - (boxRows - 1) * GRADE3_BAND_GAP - boxRows * boxExtraY;
+
+    best = Math.max(best, Math.min(
+      width / (perRow * columns * GRADE3_GLYPH_ADVANCE),
+      height / (boxRows * rows * GRADE3_GLYPH_LINE)
+    ));
+  }
+
+  return best;
 }
 
 // The distractor set leans on the mistakes a child actually makes at this
@@ -3780,7 +4005,7 @@ function createGrade3Reward(reward, item, jackpot) {
 }
 
 async function playGrade3Correct(buttonEl, token) {
-  const groups = Array.from(grade3Stage.querySelectorAll(".g3-group"));
+  const groups = Array.from(grade3Stage.querySelectorAll(".g3-band"));
   const jackpot = Math.random() < GRADE3_JACKPOT_CHANCE;
   const pool = jackpot ? GRADE3_JACKPOT_VARIANTS : GRADE3_REWARD_VARIANTS;
   const reward = pool[Math.floor(Math.random() * pool.length)];
@@ -3791,9 +4016,9 @@ async function playGrade3Correct(buttonEl, token) {
   }
 
   grade3Stage.classList.add("g3-stage--celebrate");
-  groups.forEach((groupNode, index) => {
-    groupNode.style.setProperty("--reward-delay", `${Math.min(index * 60, 240)}ms`);
-    groupNode.classList.add("g3-group--celebrate");
+  groups.forEach((band, index) => {
+    band.style.setProperty("--reward-delay", `${Math.min(index * 60, 240)}ms`);
+    band.classList.add("g3-band--celebrate");
   });
 
   grade3PlayStep.appendChild(overlay);
@@ -3866,20 +4091,21 @@ async function playGrade3Wrong(buttonEl, token) {
   startGrade3Round();
 }
 
-// The correction is the teaching part: the groups light up one at a time
-// while the running total is spoken, so a wrong guess still ends with the
-// child hearing the count build up by skips of `unit` rather than just the
-// bare answer.
+// The correction is the teaching part: the bands light up one at a time while
+// the running total is spoken, so a wrong guess still ends with the child
+// hearing the count build up by skips of `unit` rather than just the bare
+// answer. A band is one group under 묶음 and one row under 배열, which is why
+// both shapes can share this without knowing about each other.
 async function demonstrateGrade3Count(token) {
-  const groups = Array.from(grade3Stage.querySelectorAll(".g3-group"));
+  const bands = Array.from(grade3Stage.querySelectorAll(".g3-band"));
   const unit = grade3State.unit;
 
-  for (let index = 0; index < groups.length; index += 1) {
+  for (let index = 0; index < bands.length; index += 1) {
     if (grade3State.playbackToken !== token) {
       return;
     }
 
-    groups[index].classList.add("g3-group--active");
+    bands[index].classList.add("g3-band--active");
     const runningTotal = unit * (index + 1);
     grade3StatusText.textContent = String(runningTotal);
     cancelSpeech();
