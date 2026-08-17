@@ -2976,6 +2976,965 @@ function playRoundCompleteChime() {
   playTone(context, 1046.5, 0.1, 0.26);
 }
 
+// ============================================================
+// Grade 3 mode ("구구단 놀이") — a fully separate flow for older
+// kids practicing the multiplication tables. Nothing above this
+// line is touched or read from here except pure, state-free
+// helpers (speak, sound, svg, clamp, sanitizers, chart math) that
+// were already generic. This mode owns its own state, settings,
+// storage keys and render functions end to end.
+// ============================================================
+
+const GRADE3_UNIT_MIN = 2;
+const GRADE3_UNIT_MAX = 9;
+const GRADE3_MULTIPLIER_MIN = 1;
+const GRADE3_MULTIPLIER_MAX = 9;
+const GRADE3_INPUT_METHOD_CHOICES = [
+  { id: "choice", label: "객관식 카드" },
+  { id: "keypad", label: "숫자 키패드" }
+];
+const GRADE3_CHOICE_COUNT = 4;
+const GRADE3_PENALTY_DELAY_MIN = 0;
+const GRADE3_PENALTY_DELAY_MAX = 30;
+const GRADE3_PENALTY_DELAY_STEP = 5;
+const GRADE3_KEYPAD_MAX_DIGITS = 3;
+const GRADE3_DEMO_STEP_DELAY = 550;
+const GRADE3_REWARD_HOLD = 1500;
+const GRADE3_JACKPOT_HOLD = 2600;
+const GRADE3_JACKPOT_CHANCE = 0.1;
+const GRADE3_JACKPOT_PARTICLES = 54;
+const GRADE3_REWARD_PARTICLES = 18;
+const GRADE3_SETTINGS_STORAGE_KEY = "baby-count-grade3-settings";
+const GRADE3_PROGRESS_STORAGE_KEY = "baby-count-grade3-progress";
+
+// A single-try pool: multiple choice or keypad, there is no attempt count to
+// grade here, only right or wrong on the one answer given.
+const GRADE3_REWARD_VARIANTS = [
+  { id: "g3-star", phrase: "정답이에요!", speech: "정답이에요!", symbols: ["⭐", "✨", "🌟", "💛"] },
+  { id: "g3-brain", phrase: "척척박사네요!", speech: "척척박사네요!", symbols: ["🧠", "✨", "⭐", "🎉"] },
+  { id: "g3-nice", phrase: "완벽해요!", speech: "완벽해요!", symbols: ["👏", "💚", "⭐", "✨"] }
+];
+
+const GRADE3_JACKPOT_VARIANTS = [
+  { id: "g3-jackpot-fireworks", phrase: "우와! 구구단 마스터!", speech: "우와! 구구단 마스터!", symbols: ["🎆", "✨", "🌟", "🎊"] },
+  { id: "g3-jackpot-applause", phrase: "대단해요! 짝짝짝!", speech: "대단해요! 짝짝짝!", symbols: ["🎉", "👏", "⭐", "💛"] }
+];
+
+const grade3Settings = {
+  unitMin: GRADE3_UNIT_MIN,
+  unitMax: GRADE3_UNIT_MAX,
+  inputMethod: "choice",
+  penaltyDelay: 8
+};
+
+const grade3Progress = {
+  byUnit: {},
+  total: { ok: 0, count: 0 },
+  log: ""
+};
+
+const grade3State = {
+  playbackToken: 0,
+  item: null,
+  unit: 0,
+  multiplier: 0,
+  answer: 0,
+  lastUnit: null,
+  lastItemId: null,
+  answered: false,
+  locked: false,
+  keypadEntry: "",
+  penaltyTimerId: null
+};
+
+let syncGrade3UnitMinStepper = null;
+let syncGrade3UnitMaxStepper = null;
+
+const grade3ModeButton = document.getElementById("mode-grade3");
+const grade3UnitMinOptions = document.getElementById("g3-unit-min-options");
+const grade3UnitMaxOptions = document.getElementById("g3-unit-max-options");
+const grade3InputMethodOptions = document.getElementById("g3-input-method-options");
+const grade3PenaltyOptions = document.getElementById("g3-penalty-options");
+const grade3ProgressSummary = document.getElementById("g3-progress-summary");
+const grade3UnitAccuracy = document.getElementById("g3-unit-accuracy");
+const grade3TrendChart = document.getElementById("g3-trend-chart");
+const grade3ClearProgressButton = document.getElementById("g3-clear-progress");
+const grade3PlayStep = document.getElementById("grade3-play-step");
+const grade3ProblemLabel = document.getElementById("g3-problem-label");
+const grade3Stage = document.getElementById("g3-stage");
+const grade3Choices = document.getElementById("g3-choices");
+const grade3Keypad = document.getElementById("g3-keypad");
+const grade3KeypadDisplay = document.getElementById("g3-keypad-display");
+const grade3KeypadGrid = grade3Keypad ? grade3Keypad.querySelector(".g3-keypad-grid") : null;
+const grade3StatusText = document.getElementById("g3-status-text");
+
+function createGrade3Bucket() {
+  return { ok: 0, count: 0 };
+}
+
+// Mirrors loadTouchSettings: storage can throw in some privacy modes, and a
+// corrupt entry is no reason to block play, so every read is guarded and
+// falls back to the defaults.
+function loadGrade3Settings() {
+  let raw = null;
+
+  try {
+    raw = window.localStorage.getItem(GRADE3_SETTINGS_STORAGE_KEY);
+  } catch {
+    return;
+  }
+
+  if (!raw) {
+    return;
+  }
+
+  try {
+    const saved = JSON.parse(raw);
+
+    if (isWholeNumberInRange(saved.unitMin, GRADE3_UNIT_MIN, GRADE3_UNIT_MAX)) {
+      grade3Settings.unitMin = saved.unitMin;
+    }
+
+    if (isWholeNumberInRange(saved.unitMax, GRADE3_UNIT_MIN, GRADE3_UNIT_MAX)) {
+      grade3Settings.unitMax = saved.unitMax;
+    }
+
+    if (grade3Settings.unitMin > grade3Settings.unitMax) {
+      const swap = grade3Settings.unitMin;
+      grade3Settings.unitMin = grade3Settings.unitMax;
+      grade3Settings.unitMax = swap;
+    }
+
+    if (GRADE3_INPUT_METHOD_CHOICES.some((choice) => choice.id === saved.inputMethod)) {
+      grade3Settings.inputMethod = saved.inputMethod;
+    }
+
+    if (isWholeNumberInRange(saved.penaltyDelay, GRADE3_PENALTY_DELAY_MIN, GRADE3_PENALTY_DELAY_MAX)) {
+      grade3Settings.penaltyDelay = saved.penaltyDelay;
+    }
+  } catch {
+    // A corrupt entry is no reason to block play.
+  }
+}
+
+function saveGrade3Settings() {
+  try {
+    window.localStorage.setItem(GRADE3_SETTINGS_STORAGE_KEY, JSON.stringify(grade3Settings));
+  } catch {
+    // Settings simply do not persist here.
+  }
+}
+
+function loadGrade3Progress() {
+  let raw = null;
+
+  try {
+    raw = window.localStorage.getItem(GRADE3_PROGRESS_STORAGE_KEY);
+  } catch {
+    return;
+  }
+
+  if (!raw) {
+    return;
+  }
+
+  try {
+    const saved = JSON.parse(raw);
+    grade3Progress.byUnit = sanitizeBuckets(saved.byUnit);
+    const total = sanitizeBucket(saved.total);
+    grade3Progress.total = total || createGrade3Bucket();
+    grade3Progress.log = sanitizeLog(saved.log);
+  } catch {
+    clearGrade3ProgressState();
+  }
+}
+
+function saveGrade3Progress() {
+  try {
+    window.localStorage.setItem(GRADE3_PROGRESS_STORAGE_KEY, JSON.stringify(grade3Progress));
+  } catch {
+    // The session still plays; only the history is lost.
+  }
+}
+
+function clearGrade3ProgressState() {
+  grade3Progress.byUnit = {};
+  grade3Progress.total = createGrade3Bucket();
+  grade3Progress.log = "";
+}
+
+function clearGrade3Progress() {
+  clearGrade3ProgressState();
+  saveGrade3Progress();
+  renderGrade3ProgressSummary();
+}
+
+function recordGrade3Result(unit, isCorrect) {
+  const key = String(unit);
+  grade3Progress.byUnit[key] = grade3Progress.byUnit[key] || createGrade3Bucket();
+
+  [grade3Progress.byUnit[key], grade3Progress.total].forEach((bucket) => {
+    bucket.count += 1;
+
+    if (isCorrect) {
+      bucket.ok += 1;
+    }
+  });
+
+  grade3Progress.log = appendProgressLog(grade3Progress.log, isCorrect);
+  saveGrade3Progress();
+}
+
+function renderGrade3ProgressSummary() {
+  if (grade3ProgressSummary) {
+    grade3ProgressSummary.textContent = grade3Progress.total.count === 0
+      ? "아직 기록이 없어요."
+      : formatAccuracy(grade3Progress.total);
+  }
+
+  renderGrade3UnitAccuracy();
+  renderGrade3TrendChart();
+}
+
+function renderGrade3UnitAccuracy() {
+  if (!grade3UnitAccuracy) {
+    return;
+  }
+
+  grade3UnitAccuracy.innerHTML = "";
+
+  const keys = Object.keys(grade3Progress.byUnit)
+    .filter((key) => grade3Progress.byUnit[key].count > 0)
+    .sort((a, b) => Number(a) - Number(b));
+
+  if (keys.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "accuracy-empty";
+    empty.textContent = "단별 기록은 문제를 풀면 쌓여요.";
+    grade3UnitAccuracy.appendChild(empty);
+    return;
+  }
+
+  keys.forEach((key) => {
+    grade3UnitAccuracy.appendChild(createAccuracyRow(`${key}단`, grade3Progress.byUnit[key], true));
+  });
+}
+
+// A trimmed twin of renderMovingAverageChart: same math (computeMovingAverage,
+// downsampleSeries), no chance-level line, since guessing odds differ between
+// the choice and keypad input methods and there is no one number to draw.
+function renderGrade3TrendChart() {
+  if (!grade3TrendChart) {
+    return;
+  }
+
+  grade3TrendChart.innerHTML = "";
+
+  const allPoints = computeMovingAverage(grade3Progress.log, MOVING_AVERAGE_WINDOW);
+
+  if (allPoints.length === 0) {
+    const note = document.createElement("p");
+    note.className = "accuracy-empty";
+    note.textContent = `${MOVING_AVERAGE_WINDOW}문제부터 추이가 표시돼요.`;
+    grade3TrendChart.appendChild(note);
+    return;
+  }
+
+  const points = downsampleSeries(allPoints, TREND_MAX_COLUMNS);
+  const latest = allPoints[allPoints.length - 1];
+
+  const heading = document.createElement("p");
+  heading.className = "trend-heading";
+  heading.textContent = `최근 ${MOVING_AVERAGE_WINDOW}문제 이동평균 ${Math.round(latest.value * 100)}%`;
+  grade3TrendChart.appendChild(heading);
+
+  const width = 300;
+  const height = 132;
+  const pad = { top: 10, right: 12, bottom: 22, left: 34 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+
+  const svg = svgNode("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    class: "trend-svg",
+    role: "img",
+    "aria-label": `${MOVING_AVERAGE_WINDOW}문제 이동평균 추이, 현재 ${Math.round(latest.value * 100)}퍼센트`
+  });
+
+  const xFor = (index) => points.length === 1
+    ? pad.left + plotWidth / 2
+    : pad.left + (index / (points.length - 1)) * plotWidth;
+  const yFor = (value) => pad.top + (1 - value) * plotHeight;
+
+  svg.appendChild(svgNode("line", {
+    x1: pad.left, y1: pad.top, x2: pad.left, y2: pad.top + plotHeight, class: "trend-axis"
+  }));
+  svg.appendChild(svgNode("line", {
+    x1: pad.left, y1: pad.top + plotHeight, x2: pad.left + plotWidth, y2: pad.top + plotHeight,
+    class: "trend-axis"
+  }));
+
+  [0, 0.5, 1].forEach((value) => {
+    const tick = svgNode("text", {
+      x: pad.left - 6, y: yFor(value) + 3.5, class: "trend-tick", "text-anchor": "end"
+    });
+    tick.textContent = `${value * 100}%`;
+    svg.appendChild(tick);
+  });
+
+  const path = points
+    .map((point, index) => `${index === 0 ? "M" : "L"}${xFor(index).toFixed(1)} ${yFor(point.value).toFixed(1)}`)
+    .join(" ");
+  svg.appendChild(svgNode("path", { d: path, class: "trend-line" }));
+
+  svg.appendChild(svgNode("circle", {
+    cx: xFor(points.length - 1), cy: yFor(points[points.length - 1].value), r: 4, class: "trend-endpoint"
+  }));
+
+  [allPoints[0].at, latest.at].forEach((at, index) => {
+    const label = svgNode("text", {
+      x: index === 0 ? pad.left : pad.left + plotWidth,
+      y: height - 6,
+      class: "trend-tick",
+      "text-anchor": index === 0 ? "start" : "end"
+    });
+    label.textContent = `${at}번`;
+    svg.appendChild(label);
+  });
+
+  grade3TrendChart.appendChild(svg);
+}
+
+// A local twin of renderStepper/renderSettingOptions: the originals call
+// saveTouchSettings() directly rather than taking a persist callback, so
+// reusing them here would quietly write into the baby modes' storage entry.
+function renderGrade3Stepper(container, config) {
+  if (!container) {
+    return null;
+  }
+
+  container.innerHTML = "";
+  container.classList.add("mode-stepper");
+
+  const makeButton = (label, delta) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mode-stepper-button";
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      const next = clamp(config.get() + delta, config.min, config.max);
+
+      if (next === config.get()) {
+        return;
+      }
+
+      config.set(next);
+      saveGrade3Settings();
+      sync();
+    });
+    return button;
+  };
+
+  const decrease = makeButton("−", -config.step);
+  const value = document.createElement("span");
+  value.className = "mode-stepper-value";
+  value.setAttribute("role", "status");
+  value.setAttribute("aria-label", config.ariaLabel);
+  const increase = makeButton("+", config.step);
+
+  const sync = () => {
+    const current = config.get();
+    value.textContent = config.format(current);
+    decrease.disabled = current <= config.min;
+    increase.disabled = current >= config.max;
+  };
+
+  container.append(decrease, value, increase);
+  sync();
+  return sync;
+}
+
+function renderGrade3SettingOptions(container, choices, getCurrent, apply) {
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = "";
+
+  choices.forEach((choice) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mode-setting-option";
+    button.dataset.value = choice.id;
+    button.textContent = choice.label;
+    button.addEventListener("click", () => {
+      apply(choice.id);
+      saveGrade3Settings();
+      syncGrade3SettingOptions(container, getCurrent());
+    });
+    container.appendChild(button);
+  });
+
+  syncGrade3SettingOptions(container, getCurrent());
+}
+
+function syncGrade3SettingOptions(container, currentValue) {
+  container.querySelectorAll(".mode-setting-option").forEach((button) => {
+    const isSelected = button.dataset.value === currentValue;
+    button.classList.toggle("selected", isSelected);
+    button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+  });
+}
+
+function initGrade3Mode() {
+  if (grade3ModeButton) {
+    grade3ModeButton.addEventListener("click", enterGrade3Mode);
+  }
+
+  syncGrade3UnitMinStepper = renderGrade3Stepper(grade3UnitMinOptions, {
+    min: GRADE3_UNIT_MIN,
+    max: GRADE3_UNIT_MAX,
+    step: 1,
+    ariaLabel: "시작 단",
+    format: (value) => `${value}단`,
+    get: () => grade3Settings.unitMin,
+    set: (value) => {
+      grade3Settings.unitMin = value;
+
+      if (grade3Settings.unitMax < value) {
+        grade3Settings.unitMax = value;
+
+        if (syncGrade3UnitMaxStepper) {
+          syncGrade3UnitMaxStepper();
+        }
+      }
+    }
+  });
+
+  syncGrade3UnitMaxStepper = renderGrade3Stepper(grade3UnitMaxOptions, {
+    min: GRADE3_UNIT_MIN,
+    max: GRADE3_UNIT_MAX,
+    step: 1,
+    ariaLabel: "끝 단",
+    format: (value) => `${value}단`,
+    get: () => grade3Settings.unitMax,
+    set: (value) => {
+      grade3Settings.unitMax = value;
+
+      if (grade3Settings.unitMin > value) {
+        grade3Settings.unitMin = value;
+
+        if (syncGrade3UnitMinStepper) {
+          syncGrade3UnitMinStepper();
+        }
+      }
+    }
+  });
+
+  renderGrade3SettingOptions(
+    grade3InputMethodOptions,
+    GRADE3_INPUT_METHOD_CHOICES,
+    () => grade3Settings.inputMethod,
+    (id) => {
+      grade3Settings.inputMethod = id;
+    }
+  );
+
+  renderGrade3Stepper(grade3PenaltyOptions, {
+    min: GRADE3_PENALTY_DELAY_MIN,
+    max: GRADE3_PENALTY_DELAY_MAX,
+    step: GRADE3_PENALTY_DELAY_STEP,
+    ariaLabel: "틀렸을 때 기다리는 시간",
+    format: (value) => (value === 0 ? "없음" : `${value}초`),
+    get: () => grade3Settings.penaltyDelay,
+    set: (value) => {
+      grade3Settings.penaltyDelay = value;
+    }
+  });
+
+  if (grade3ClearProgressButton) {
+    grade3ClearProgressButton.addEventListener("click", clearGrade3Progress);
+  }
+
+  renderGrade3ProgressSummary();
+}
+
+function nextGrade3Token() {
+  grade3State.playbackToken += 1;
+  return grade3State.playbackToken;
+}
+
+function enterGrade3Mode() {
+  grade3State.lastItemId = null;
+  grade3State.lastUnit = null;
+  showGrade3Play();
+  startGrade3Round();
+}
+
+// A hand-rolled twin of showStep: the original's step map is a closed set of
+// three keys read from module-level consts, and extending it would be the one
+// touch this mode makes to the code above. Managing the four panels' hidden
+// attributes directly here keeps that line clean instead.
+function showGrade3Play() {
+  modeStep.hidden = true;
+  modeStep.classList.remove("active");
+  itemStep.hidden = true;
+  itemStep.classList.remove("active");
+  playStep.hidden = true;
+  playStep.classList.remove("active");
+  grade3PlayStep.hidden = false;
+  grade3PlayStep.classList.add("active");
+}
+
+function pickGrade3Item() {
+  const pool = grade3State.lastItemId
+    ? ITEMS.filter((item) => item.id !== grade3State.lastItemId)
+    : ITEMS;
+
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function pickGrade3Unit() {
+  const min = Math.min(grade3Settings.unitMin, grade3Settings.unitMax);
+  const max = Math.max(grade3Settings.unitMin, grade3Settings.unitMax);
+  const pool = Array.from({ length: max - min + 1 }, (_, index) => min + index);
+  const avoidRepeat = pool.length > 1;
+  let unit = pool[Math.floor(Math.random() * pool.length)];
+
+  while (avoidRepeat && unit === grade3State.lastUnit) {
+    unit = pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  grade3State.lastUnit = unit;
+  return unit;
+}
+
+function pickGrade3Multiplier() {
+  return GRADE3_MULTIPLIER_MIN + Math.floor(Math.random() * (GRADE3_MULTIPLIER_MAX - GRADE3_MULTIPLIER_MIN + 1));
+}
+
+function startGrade3Round() {
+  clearGrade3PenaltyTimer();
+  cancelSpeech();
+
+  // Invalidates any pending correct/wrong flow still in flight from the round
+  // just finished, the same way every other round transition here does.
+  nextGrade3Token();
+  const item = pickGrade3Item();
+  const unit = pickGrade3Unit();
+  const multiplier = pickGrade3Multiplier();
+
+  grade3State.item = item;
+  grade3State.lastItemId = item.id;
+  grade3State.unit = unit;
+  grade3State.multiplier = multiplier;
+  grade3State.answer = unit * multiplier;
+  grade3State.answered = false;
+  grade3State.locked = false;
+  grade3State.keypadEntry = "";
+
+  grade3Stage.innerHTML = "";
+  grade3Stage.classList.remove("g3-stage--celebrate");
+  grade3Choices.innerHTML = "";
+
+  renderGrade3Groups(item, unit, multiplier);
+
+  grade3ProblemLabel.textContent = `${unit} × ${multiplier}`;
+
+  const prompt = `${item.name} ${unit}개씩 ${multiplier}묶음이에요. 모두 몇 개일까요?`;
+  grade3StatusText.textContent = prompt;
+
+  if (grade3Settings.inputMethod === "keypad") {
+    grade3Choices.hidden = true;
+    grade3Keypad.hidden = false;
+    renderGrade3Keypad();
+  } else {
+    grade3Keypad.hidden = true;
+    grade3Choices.hidden = false;
+    renderGrade3Choices(grade3State.answer);
+  }
+
+  speak(prompt);
+}
+
+function renderGrade3Groups(item, unit, multiplier) {
+  const columns = Math.min(unit, 3);
+
+  for (let group = 0; group < multiplier; group += 1) {
+    const groupNode = document.createElement("div");
+    groupNode.className = "g3-group";
+    groupNode.dataset.groupIndex = String(group);
+    groupNode.style.setProperty("--g3-cols", String(columns));
+
+    for (let index = 0; index < unit; index += 1) {
+      const glyph = document.createElement("span");
+      glyph.className = "g3-item";
+      glyph.textContent = item.symbol;
+      groupNode.appendChild(glyph);
+    }
+
+    grade3Stage.appendChild(groupNode);
+  }
+}
+
+// The distractor set leans on the mistakes a child actually makes at this
+// level: one group too many or few, one item per group too many or few, and
+// adding the factors instead of multiplying them.
+function buildGrade3Distractors(answer, unit, multiplier) {
+  const candidates = new Set([
+    answer - unit,
+    answer + unit,
+    answer - multiplier,
+    answer + multiplier,
+    unit + multiplier,
+    answer + 1,
+    answer - 1
+  ]);
+
+  candidates.delete(answer);
+
+  const pool = Array.from(candidates).filter((value) => value > 0 && value <= 100);
+
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [pool[index], pool[swapIndex]] = [pool[swapIndex], pool[index]];
+  }
+
+  const picked = [];
+
+  pool.forEach((value) => {
+    if (picked.length < GRADE3_CHOICE_COUNT - 1 && !picked.includes(value)) {
+      picked.push(value);
+    }
+  });
+
+  // Small unit/multiplier pairs can starve the pool above; fill out from a
+  // simple walk so the round always has a full set of choices.
+  let filler = answer + 2;
+
+  while (picked.length < GRADE3_CHOICE_COUNT - 1) {
+    if (filler !== answer && filler > 0 && !picked.includes(filler)) {
+      picked.push(filler);
+    }
+
+    filler += 1;
+  }
+
+  return picked;
+}
+
+function shuffleGrade3Values(values) {
+  const copy = [...values];
+
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+
+  return copy;
+}
+
+function renderGrade3Choices(answer) {
+  const distractors = buildGrade3Distractors(answer, grade3State.unit, grade3State.multiplier);
+  const values = shuffleGrade3Values([answer, ...distractors]);
+
+  grade3Choices.innerHTML = "";
+
+  values.forEach((value) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "g3-choice";
+    button.textContent = String(value);
+    button.dataset.value = String(value);
+    button.addEventListener("click", () => handleGrade3Answer(value, button));
+    grade3Choices.appendChild(button);
+  });
+}
+
+function renderGrade3Keypad() {
+  updateGrade3KeypadDisplay();
+
+  if (!grade3KeypadGrid) {
+    return;
+  }
+
+  grade3KeypadGrid.innerHTML = "";
+
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "지우기", "0", "확인"];
+
+  keys.forEach((key) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = key === "확인" ? "g3-key g3-key--submit" : "g3-key";
+    button.textContent = key;
+    button.addEventListener("click", () => handleGrade3KeypadKey(key));
+    grade3KeypadGrid.appendChild(button);
+  });
+}
+
+function handleGrade3KeypadKey(key) {
+  if (grade3State.answered || grade3State.locked) {
+    return;
+  }
+
+  if (key === "지우기") {
+    grade3State.keypadEntry = grade3State.keypadEntry.slice(0, -1);
+    updateGrade3KeypadDisplay();
+    return;
+  }
+
+  if (key === "확인") {
+    if (grade3State.keypadEntry === "") {
+      return;
+    }
+
+    handleGrade3Answer(Number(grade3State.keypadEntry), null);
+    return;
+  }
+
+  if (grade3State.keypadEntry.length < GRADE3_KEYPAD_MAX_DIGITS) {
+    grade3State.keypadEntry += key;
+    updateGrade3KeypadDisplay();
+  }
+}
+
+function updateGrade3KeypadDisplay() {
+  if (grade3KeypadDisplay) {
+    grade3KeypadDisplay.textContent = grade3State.keypadEntry || "0";
+  }
+}
+
+async function handleGrade3Answer(value, buttonEl) {
+  if (grade3State.answered || grade3State.locked) {
+    return;
+  }
+
+  grade3State.answered = true;
+  grade3State.locked = true;
+
+  const token = nextGrade3Token();
+  const isCorrect = value === grade3State.answer;
+
+  recordGrade3Result(grade3State.unit, isCorrect);
+  renderGrade3ProgressSummary();
+
+  if (grade3Settings.inputMethod === "choice") {
+    grade3Choices.querySelectorAll(".g3-choice").forEach((button) => {
+      button.disabled = true;
+    });
+  } else if (grade3KeypadGrid) {
+    grade3KeypadGrid.querySelectorAll(".g3-key").forEach((button) => {
+      button.disabled = true;
+    });
+  }
+
+  if (isCorrect) {
+    await playGrade3Correct(buttonEl, token);
+  } else {
+    await playGrade3Wrong(buttonEl, token);
+  }
+}
+
+// The reward carries the same visual/audio system as the modes above
+// (createInstantReward's CSS keyframes are generic), but a parameterized
+// twin rather than a shared call: the original reads item and container from
+// appState/playStep directly, and this mode has neither.
+function createGrade3Reward(reward, item, jackpot) {
+  const overlay = document.createElement("div");
+  const tierClass = jackpot ? "jackpot" : "steady-try";
+  overlay.className = `instant-reward instant-reward--${reward.id} instant-reward--${tierClass}`;
+  overlay.setAttribute("aria-hidden", "true");
+
+  const message = document.createElement("div");
+  message.className = "instant-reward-message";
+  message.textContent = reward.phrase;
+  overlay.appendChild(message);
+
+  const symbols = item ? [item.symbol, ...reward.symbols] : reward.symbols;
+  const particleCount = jackpot ? GRADE3_JACKPOT_PARTICLES : GRADE3_REWARD_PARTICLES;
+
+  for (let index = 0; index < particleCount; index += 1) {
+    const particle = document.createElement("span");
+    particle.className = "instant-reward-particle";
+    particle.textContent = symbols[index % symbols.length];
+
+    if (jackpot) {
+      particle.style.setProperty("--rain-x", `${randomBetween(2, 98).toFixed(1)}%`);
+      particle.style.setProperty("--x", `${randomBetween(-9, 9)}vw`);
+      particle.style.setProperty("--y", `${randomBetween(108, 134)}vh`);
+      particle.style.setProperty("--spin", `${randomBetween(-260, 260)}deg`);
+      particle.style.setProperty("--delay", `${Math.round(randomBetween(0, 900))}ms`);
+      particle.style.setProperty("--size", `${randomBetween(1.8, 4).toFixed(2)}rem`);
+    } else {
+      particle.style.setProperty("--x", `${randomBetween(-42, 42)}vw`);
+      particle.style.setProperty("--y", `${randomBetween(-34, 26)}vh`);
+      particle.style.setProperty("--spin", `${randomBetween(-70, 70)}deg`);
+      particle.style.setProperty("--delay", `${index * 34}ms`);
+      particle.style.setProperty("--size", `${randomBetween(1.3, 2.7).toFixed(2)}rem`);
+    }
+
+    overlay.appendChild(particle);
+  }
+
+  return overlay;
+}
+
+async function playGrade3Correct(buttonEl, token) {
+  const groups = Array.from(grade3Stage.querySelectorAll(".g3-group"));
+  const jackpot = Math.random() < GRADE3_JACKPOT_CHANCE;
+  const pool = jackpot ? GRADE3_JACKPOT_VARIANTS : GRADE3_REWARD_VARIANTS;
+  const reward = pool[Math.floor(Math.random() * pool.length)];
+  const overlay = createGrade3Reward(reward, grade3State.item, jackpot);
+
+  if (buttonEl) {
+    buttonEl.classList.add("g3-choice--correct");
+  }
+
+  grade3Stage.classList.add("g3-stage--celebrate");
+  groups.forEach((groupNode, index) => {
+    groupNode.style.setProperty("--reward-delay", `${Math.min(index * 60, 240)}ms`);
+    groupNode.classList.add("g3-group--celebrate");
+  });
+
+  grade3PlayStep.appendChild(overlay);
+
+  const unit = grade3State.unit;
+  const multiplier = grade3State.multiplier;
+  const answer = grade3State.answer;
+
+  grade3StatusText.textContent = `${unit} × ${multiplier} = ${answer}, ${reward.phrase}`;
+  cancelSpeech();
+
+  const soundPromise = jackpot ? playFanfareSound() : playCheerSound();
+  const speechPromise = speak(`${unit} 곱하기 ${multiplier}는 ${answer}, ${reward.speech}`);
+
+  try {
+    await wait(jackpot ? GRADE3_JACKPOT_HOLD : GRADE3_REWARD_HOLD);
+    await Promise.allSettled([soundPromise, speechPromise]);
+  } finally {
+    overlay.remove();
+  }
+
+  if (grade3State.playbackToken !== token) {
+    return;
+  }
+
+  startGrade3Round();
+}
+
+async function playGrade3Wrong(buttonEl, token) {
+  const context = getAudioContext();
+
+  if (buttonEl) {
+    buttonEl.classList.add("g3-choice--wrong");
+  }
+
+  if (context) {
+    playTone(context, 220, 0, 0.18, 0.16);
+    playTone(context, 165, 0.16, 0.26, 0.16);
+  }
+
+  const retryPhrase = "다시 세어 볼까요?";
+  grade3StatusText.textContent = retryPhrase;
+  cancelSpeech();
+  await speak(retryPhrase);
+
+  if (grade3State.playbackToken !== token) {
+    return;
+  }
+
+  if (grade3Settings.inputMethod === "choice") {
+    const correctButton = grade3Choices.querySelector(`.g3-choice[data-value="${grade3State.answer}"]`);
+
+    if (correctButton) {
+      correctButton.classList.add("g3-choice--reveal");
+    }
+  }
+
+  await demonstrateGrade3Count(token);
+
+  if (grade3State.playbackToken !== token) {
+    return;
+  }
+
+  await waitOutGrade3Penalty(token);
+
+  if (grade3State.playbackToken !== token) {
+    return;
+  }
+
+  startGrade3Round();
+}
+
+// The correction is the teaching part: the groups light up one at a time
+// while the running total is spoken, so a wrong guess still ends with the
+// child hearing the count build up by skips of `unit` rather than just the
+// bare answer.
+async function demonstrateGrade3Count(token) {
+  const groups = Array.from(grade3Stage.querySelectorAll(".g3-group"));
+  const unit = grade3State.unit;
+
+  for (let index = 0; index < groups.length; index += 1) {
+    if (grade3State.playbackToken !== token) {
+      return;
+    }
+
+    groups[index].classList.add("g3-group--active");
+    const runningTotal = unit * (index + 1);
+    grade3StatusText.textContent = String(runningTotal);
+    cancelSpeech();
+    await Promise.allSettled([speak(String(runningTotal)), wait(GRADE3_DEMO_STEP_DELAY)]);
+  }
+
+  if (grade3State.playbackToken !== token) {
+    return;
+  }
+
+  const summary = `${unit} × ${grade3State.multiplier} = ${grade3State.answer}`;
+  grade3StatusText.textContent = summary;
+  cancelSpeech();
+  await speak(`${unit} 곱하기 ${grade3State.multiplier}는 ${grade3State.answer}`);
+}
+
+function waitOutGrade3Penalty(token) {
+  const seconds = grade3Settings.penaltyDelay;
+
+  if (seconds <= 0) {
+    return Promise.resolve();
+  }
+
+  const timer = document.createElement("div");
+  timer.className = "penalty-timer";
+  timer.setAttribute("aria-hidden", "true");
+  timer.style.setProperty("--penalty-duration", `${seconds}s`);
+
+  const fill = document.createElement("div");
+  fill.className = "penalty-timer-fill";
+  timer.appendChild(fill);
+  grade3Stage.appendChild(timer);
+
+  return new Promise((resolve) => {
+    grade3State.penaltyTimerId = window.setTimeout(() => {
+      grade3State.penaltyTimerId = null;
+      timer.remove();
+      resolve();
+    }, seconds * 1000);
+
+    if (grade3State.playbackToken !== token) {
+      clearGrade3PenaltyTimer();
+      timer.remove();
+      resolve();
+    }
+  });
+}
+
+function clearGrade3PenaltyTimer() {
+  if (grade3State.penaltyTimerId !== null) {
+    window.clearTimeout(grade3State.penaltyTimerId);
+    grade3State.penaltyTimerId = null;
+  }
+}
+
 loadTouchSettings();
 loadProgress();
 renderItemSelection();
@@ -2984,4 +3943,7 @@ initSystemTtsVoice();
 initFullscreenToggle();
 initObjectCardDragging();
 lockZoomGestures();
+loadGrade3Settings();
+loadGrade3Progress();
+initGrade3Mode();
 showStep("mode");

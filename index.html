@@ -77,12 +77,65 @@
             <div id="trend-chart" class="trend-chart"></div>
           </div>
         </div>
+
+        <div class="mode-card-group">
+          <button id="mode-grade3" class="mode-card" type="button">
+            <span class="mode-card-title">구구단 놀이 <span class="mode-card-tag">초3</span></span>
+            <span class="mode-card-desc">이모지를 묶음으로 보고 곱셈구구 정답을 맞힙니다.</span>
+          </button>
+
+          <div class="mode-settings">
+            <div class="mode-setting">
+              <span class="mode-setting-label">시작 단</span>
+              <div id="g3-unit-min-options" class="mode-setting-options" role="group" aria-label="시작 단"></div>
+            </div>
+            <div class="mode-setting">
+              <span class="mode-setting-label">끝 단</span>
+              <div id="g3-unit-max-options" class="mode-setting-options" role="group" aria-label="끝 단"></div>
+            </div>
+            <div class="mode-setting">
+              <span class="mode-setting-label">정답 입력 방식</span>
+              <div id="g3-input-method-options" class="mode-setting-options" role="group" aria-label="정답 입력 방식"></div>
+            </div>
+            <div class="mode-setting">
+              <span class="mode-setting-label">틀렸을 때 기다리기</span>
+              <div id="g3-penalty-options" class="mode-setting-options" role="group" aria-label="틀렸을 때 기다리는 시간"></div>
+            </div>
+          </div>
+
+          <div class="progress-block">
+            <div class="progress-head">
+              <h3 class="progress-title">구구단 기록</h3>
+              <button id="g3-clear-progress" class="secondary-button" type="button">기록 지우기</button>
+            </div>
+            <p id="g3-progress-summary" class="progress-summary"></p>
+            <p class="progress-caption">단별 정답률</p>
+            <div id="g3-unit-accuracy" class="number-accuracy"></div>
+            <div id="g3-trend-chart" class="trend-chart"></div>
+          </div>
+        </div>
       </div>
     </section>
 
     <section id="item-step" class="panel" aria-labelledby="item-step-title" hidden>
       <h2 id="item-step-title">무엇을 셀까요?</h2>
       <div id="item-groups" class="item-groups"></div>
+    </section>
+
+    <section id="grade3-play-step" class="panel" aria-labelledby="grade3-play-step-title" hidden>
+      <div class="panel-head">
+        <div>
+          <h2 id="grade3-play-step-title">구구단 놀이</h2>
+          <p id="g3-problem-label" class="selected-item-label"></p>
+        </div>
+      </div>
+      <div id="g3-stage" class="g3-stage" aria-live="polite"></div>
+      <div id="g3-choices" class="g3-choices" aria-label="정답 선택지" hidden></div>
+      <div id="g3-keypad" class="g3-keypad" aria-label="숫자 키패드" hidden>
+        <div id="g3-keypad-display" class="g3-keypad-display" aria-live="polite">0</div>
+        <div class="g3-keypad-grid"></div>
+      </div>
+      <p id="g3-status-text" class="status-text"></p>
     </section>
 
     <section id="play-step" class="panel" aria-labelledby="play-step-title" hidden>
